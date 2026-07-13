@@ -192,7 +192,13 @@ function ksuExec(cmd, timeoutMs) {
 // runSh: helper untuk command yang return stdout (JSON etc), tanpa logging tiap line
 async function runSh(cmdArgs, timeoutMs) {
   const r = await ksuExec('sh ' + SCRIPT_PATH + ' ' + cmdArgs, timeoutMs || 30000);
-  return r.stdout || '';
+  if (r.errno !== 0) {
+    throw new Error(r.stderr || `Command failed with exit code ${r.errno}`);
+  }
+  if (!r.stdout || !r.stdout.trim()) {
+     throw new Error(`Empty response from script (Path: ${SCRIPT_PATH})`);
+  }
+  return r.stdout.trim();
 }
 
 async function runCmd(cmd, arg) {
@@ -292,6 +298,9 @@ async function refresh() {
   showStatus('Refreshing…');
   try {
     const r = await ksuExec('sh ' + SCRIPT_PATH + ' info', 15000);
+    if (!r.stdout || !r.stdout.trim()) {
+      throw new Error("Data info kosong dari script (Script tidak ditemukan atau gagal dijalankan).");
+    }
     const d = JSON.parse(r.stdout.trim());
     document.getElementById('p-name').textContent = d.profile || '—';
     document.getElementById('p-fp').textContent = d.fingerprint || '—';
@@ -327,7 +336,8 @@ async function refresh() {
 
   try {
     const r = await ksuExec('sh ' + SCRIPT_PATH + ' personas_active', 5000);
-    const list = JSON.parse(r.stdout.trim() || '[]');
+    const stdoutTrimmed = r.stdout ? r.stdout.trim() : '';
+    const list = JSON.parse(stdoutTrimmed || '[]');
     const c = document.getElementById('persona-list');
     if (!list.length) {
       c.innerHTML = '<div style="color:#8b95b7;font-size:12px;text-align:center;padding:16px">Belum ada persona. Run FRESH IDENTITY.</div>';
@@ -348,7 +358,8 @@ async function refresh() {
 async function loadPersonasList() {
   try {
     const jsonStr = await runSh('personas_list', 8000);
-    const data = JSON.parse(jsonStr.trim());
+    if (!jsonStr) throw new Error("Empty response for personas_list");
+    const data = JSON.parse(jsonStr);
     const sel = document.getElementById('persona-select');
     sel.innerHTML = '<option value="">-- Select Persona --</option>';
 
