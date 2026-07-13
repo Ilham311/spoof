@@ -15,7 +15,7 @@ ENABLE_HOSTNAME=true            # Ubah hostname (net.hostname)
 
 # --- Wipe & Clear ---
 ENABLE_CLEAR_APPS=true          # pm clear target apps (Shopee/Tokopedia/TikTok)
-ENABLE_WIPE_SDCARD=true         # Hapus data di /sdcard/Android/data/<pkg>
+ENABLE_WIPE_SDCARD=true         # Hapus data di /sdcard/Android/data/<pkg> (diganti ke /data/media)
 ENABLE_WIPE_FIREBASE=true       # Wipe Firebase Installation ID
 ENABLE_WIPE_MEDIADRM=true       # Wipe MediaDrm L3 (DRM reset)
 ENABLE_RESET_GSF=true           # Reset GSF (Google Services Framework) ID
