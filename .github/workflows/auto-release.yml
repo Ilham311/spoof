@@ -8,12 +8,14 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
-      - uses: CupOfTea696/gh-action-auto-release@v1.0.2
+      - uses: actions/checkout@v3
+      - name: Auto-Release on Commit
+        uses: CupOfTea696/gh-action-auto-release@v1.0.2
         with:
           title: "Release: $version"
           tag: "v$semver"
-          draft: false
-          regex: "/^Release: #{semver}$/i"
+          draft: true
+          # Menghapus regex custom agar menggunakan default (mendeteksi versi semver seperti v1.0.0 di pesan commit)
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: true
