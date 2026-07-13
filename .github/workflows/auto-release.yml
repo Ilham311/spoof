@@ -1,21 +1,45 @@
-name: AutoRelease
+name: Build and Release Magisk Module
 
 on:
   push:
-    branches: [ master, main ]
+    branches:
+      - master
+      - main
+    paths:
+      - 'module.prop'
+  workflow_dispatch:
 
 jobs:
-  release:
+  build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
     steps:
-      - uses: actions/checkout@v3
-      - name: Auto-Release on Commit
-        uses: CupOfTea696/gh-action-auto-release@v1.0.2
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Get Version info
+        id: get_version
+        run: |
+          VERSION=$(grep '^version=' module.prop | cut -d'=' -f2)
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          VERSION_CODE=$(grep '^versionCode=' module.prop | cut -d'=' -f2)
+          echo "VERSION_CODE=$VERSION_CODE" >> $GITHUB_OUTPUT
+
+      - name: Create Zip Archive
+        run: |
+          ZIP_NAME="ternak_device_changer_${{ steps.get_version.outputs.VERSION }}.zip"
+          zip -r "$ZIP_NAME" . -x "*.git*" -x "*.github*" -x "*.DS_Store"
+          echo "ZIP_NAME=$ZIP_NAME" >> $GITHUB_ENV
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
         with:
-          title: "Release: $version"
-          tag: "v$semver"
-          draft: true
-          # Menghapus regex custom agar menggunakan default (mendeteksi versi semver seperti v1.0.0 di pesan commit)
+          tag_name: ${{ steps.get_version.outputs.VERSION }}
+          name: Release ${{ steps.get_version.outputs.VERSION }}
+          draft: false
+          prerelease: false
+          files: ${{ env.ZIP_NAME }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: true
