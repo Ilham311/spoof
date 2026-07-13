@@ -1,6 +1,7 @@
 id=ternak_device_changer
 name=Ternak Device Changer (WebUI)
-version=v1.0
-versionCode=1.0
+version=v4.12
+versionCode=412
 author=Ilham 
 description=Panel WebUI interaktif untuk mengacak Android ID, GAID, Device Name, serta wipe data e-commerce/socmed dengan log perbandingan live.
+updateJson=https://raw.githubusercontent.com/Ilham311/spoof/main/update.json
