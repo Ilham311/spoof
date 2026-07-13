@@ -6,47 +6,56 @@
 # Jika tidak ada, jalankan Full Proses via terminal.
 # ============================================================
 
-MODDIR=${0%/*}
+MODDIR="${0%/*}"
 MODULE_ID="ternak_device_changer"
 
 # --- Coba buka WebUI lewat manager yang tersedia ---
 
+# Fungsi helper untuk cek package dan start activity
+check_and_start() {
+    local pkg="$1"
+    local cmp="$2"
+    local ext_key="$3"
+
+    if pm list packages 2>/dev/null | grep -q "^package:${pkg}\$"; then
+        echo "- Membuka WebUI di ${pkg}..."
+        # Menggunakan --user 0 atau current untuk kompatibilitas multi-user
+        am start --user 0 -n "${cmp}" -e "${ext_key}" "$MODULE_ID" >/dev/null 2>&1
+        exit 0
+    fi
+}
+
 # 1. KSUWebUIStandalone
-if pm list packages 2>/dev/null | grep -q "io.github.a13e300.ksuwebui"; then
-    echo "- Membuka WebUI di KSUWebUIStandalone..."
-    am start -n "io.github.a13e300.ksuwebui/.WebUIActivity" -e id "$MODULE_ID" >/dev/null 2>&1
-    exit 0
-fi
+check_and_start "io.github.a13e300.ksuwebui" "io.github.a13e300.ksuwebui/.WebUIActivity" "id"
 
 # 2. MMRL (Magisk Module Repo Loader)
-if pm list packages 2>/dev/null | grep -q "com.dergoogler.mmrl"; then
-    echo "- Membuka WebUI di MMRL..."
-    am start -n "com.dergoogler.mmrl/.ui.activity.webui.WebUIActivity" -e MOD_ID "$MODULE_ID" >/dev/null 2>&1
-    exit 0
-fi
+check_and_start "com.dergoogler.mmrl" "com.dergoogler.mmrl/.ui.activity.webui.WebUIActivity" "MOD_ID"
 
 # 3. WebUI-X Portable
-if pm list packages 2>/dev/null | grep -q "com.wxportal"; then
-    echo "- Membuka WebUI di WebUI-X..."
-    am start -n "com.wxportal/.WebUIActivity" -e id "$MODULE_ID" >/dev/null 2>&1
-    exit 0
-fi
+check_and_start "com.wxportal" "com.wxportal/.WebUIActivity" "id"
 
 # --- Tidak ada WebUI manager: jalankan Full Proses via terminal ---
-echo ""
-echo "⚠️  Tidak ada WebUI Manager terdeteksi!"
-echo "   Install salah satu aplikasi berikut untuk"
-echo "   mendapatkan tampilan antarmuka grafis (WebUI):"
-echo ""
-echo "   • KSUWebUIStandalone"
-echo "   • MMRL (Magisk Module Repo Loader)"
-echo "   • WebUI-X Portable"
-echo ""
-echo "   Sementara itu, menjalankan Quick Action..."
-echo "================================================"
-echo ""
+cat <<EOF
 
-sh "$MODDIR/ternak_core.sh" full
+⚠️  Tidak ada WebUI Manager terdeteksi!
+   Install salah satu aplikasi berikut untuk
+   mendapatkan tampilan antarmuka grafis (WebUI):
+
+   • KSUWebUIStandalone
+   • MMRL (Magisk Module Repo Loader)
+   • WebUI-X Portable
+
+   Sementara itu, menjalankan Quick Action...
+================================================
+
+EOF
+
+# FIX: Script yang dipanggil sebelumnya salah nama (ternak_core.sh vs ternak_core_v4.sh)
+if [ -f "$MODDIR/ternak_core_v4.sh" ]; then
+    sh "$MODDIR/ternak_core_v4.sh" full
+else
+    echo "[-] Error: Core script tidak ditemukan!"
+fi
 
 echo ""
 echo "[✓] Selesai!"
