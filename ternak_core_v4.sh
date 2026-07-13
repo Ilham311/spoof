@@ -162,7 +162,7 @@ rprop_set() {
 
 rprop_get() {
     [ -z "$RESETPROP_BIN" ] && return
-    "$RESETPROP_BIN" -v "$1" 2>/dev/null
+    "$RESETPROP_BIN" "$1" 2>/dev/null
 }
 
 trim_ws() { echo "$1" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'; }
@@ -217,7 +217,7 @@ generate_serial_samsung() {
 generate_serial_generic() { generate_hex 16 | tr 'a-f' 'A-F'; }
 generate_mac() {
     local b1_raw=$(dd if=/dev/urandom bs=1 count=1 2>/dev/null | od -An -tx1 | tr -d ' \n')
-    local b1_dec=$((0x${b1_raw} & 0xFC))
+    local b1_dec=$(( (0x${b1_raw} & 0xFE) | 0x02 ))
     local b1=$(printf "%02x" $b1_dec)
     local rest=$(dd if=/dev/urandom bs=1 count=5 2>/dev/null | od -An -tx1 | tr -d ' \n')
     echo "${b1}:$(echo $rest | cut -c1-2):$(echo $rest | cut -c3-4):$(echo $rest | cut -c5-6):$(echo $rest | cut -c7-8):$(echo $rest | cut -c9-10)"
