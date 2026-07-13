@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ternak Device Changer v4.12 — A15</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, 'Roboto', sans-serif; background: #0a0e1a; color: #e4e6eb; padding: 16px; min-height: 100vh; }
+.container { max-width: 720px; margin: 0 auto; }
+.header { display: flex; justify-content: space-between; align-items: center; padding: 16px; background: linear-gradient(135deg, #1a237e, #311b92); border-radius: 12px; margin-bottom: 16px; }
+.logo { font-size: 22px; font-weight: 700; }
+.logo .ver { font-size: 11px; opacity: 0.7; }
+.badges { display: flex; flex-wrap: wrap; gap: 6px; }
+.badge { font-size: 10px; padding: 4px 8px; border-radius: 12px; background: rgba(255,255,255,0.1); border: 1px solid transparent; }
+.badge.ok { background: rgba(76,175,80,0.2); border-color: #4caf50; color: #81c784; }
+.badge.err { background: rgba(244,67,54,0.2); border-color: #f44336; color: #e57373; }
+.badge.warn { background: rgba(255,152,0,0.2); border-color: #ff9800; color: #ffb74d; }
+.card { background: #161b2e; border: 1px solid #2a3147; border-radius: 12px; padding: 16px; margin-bottom: 12px; }
+.card-title { font-size: 13px; font-weight: 600; color: #8b95b7; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; }
+.row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #232a40; font-size: 13px; }
+.row:last-child { border-bottom: 0; }
+.row .k { color: #8b95b7; }
+.row .v { color: #fff; font-family: 'Roboto Mono', monospace; font-size: 12px; max-width: 60%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.persona-banner { background: linear-gradient(135deg, #00897b, #1a237e); padding: 12px; border-radius: 8px; margin-bottom: 12px; }
+.persona-banner .name { font-size: 15px; font-weight: 700; color: #fff; }
+.persona-banner .fp { font-size: 10px; color: rgba(255,255,255,0.7); font-family: monospace; margin-top: 4px; word-break: break-all; }
+select { background: #1f2640; color: #fff; border: 1px solid #2a3147; padding: 8px; border-radius: 6px; font-size: 12px; width: 100%; margin-bottom: 8px; }
+.persona-item { background: #1f2640; border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; }
+.persona-item .pkg { font-size: 12px; color: #b39ddb; }
+.persona-item .meta { font-size: 11px; color: #8b95b7; margin-top: 2px; }
+.persona-item button { background: #d32f2f; color: #fff; border: 0; padding: 6px 12px; border-radius: 6px; font-size: 11px; cursor: pointer; }
+.btn-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
+.btn { background: #2962ff; color: #fff; border: 0; padding: 14px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; transition: 0.15s; }
+.btn:active { transform: scale(0.97); }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn.primary { background: linear-gradient(135deg, #d50000, #ff6f00); }
+.btn.success { background: #00897b; }
+.btn.warn { background: #f57c00; }
+.btn.full-width { grid-column: 1 / -1; }
+.console { background: #000; color: #00ff88; font-family: 'Roboto Mono', monospace; font-size: 11px; padding: 12px; border-radius: 8px; height: 220px; overflow-y: auto; white-space: pre-wrap; border: 1px solid #2a3147; }
+.console .err { color: #ff5252; } .console .ok { color: #00ff88; } .console .warn { color: #ffeb3b; } .console .info { color: #4fc3f7; }
+.status-pill { position: fixed; bottom: 16px; right: 16px; padding: 8px 14px; border-radius: 20px; background: #2962ff; color: #fff; font-size: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.4); display: none; }
+.status-pill.show { display: block; }
+.sett-row { display: flex; justify-content: space-between; align-items: center; padding: 9px 0; border-bottom: 1px solid #232a40; font-size: 13px; }
+.sett-row:last-child { border-bottom: 0; }
+.sett-row .sk { color: #c5cae9; flex: 1; }
+.sett-row .sdesc { color: #5a6280; font-size: 11px; margin-top: 2px; }
+.toggle { position: relative; display: inline-block; width: 42px; height: 24px; flex-shrink: 0; }
+.toggle input { opacity: 0; width: 0; height: 0; }
+.slider { position: absolute; cursor: pointer; inset: 0; background: #37474f; border-radius: 24px; transition: .2s; }
+.slider:before { position: absolute; content: ""; height: 18px; width: 18px; left: 3px; bottom: 3px; background: #fff; border-radius: 50%; transition: .2s; }
+input:checked + .slider { background: #00897b; }
+input:checked + .slider:before { transform: translateX(18px); }
+.sett-group-title { font-size: 11px; font-weight: 700; color: #5a6280; text-transform: uppercase; letter-spacing: 0.6px; margin: 10px 0 4px; }
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="header">
+    <div class="logo">🐎 Ternak<br><span class="ver">v4.12 · safe · A15</span></div>
+    <div class="badges" id="moduleBadges"><span class="badge">…</span></div>
+  </div>
+
+  <!-- Persona System -->
+  <div class="card">
+    <div class="card-title"><span>🎭 Persona System</span></div>
+    <div style="margin-bottom: 12px; display: flex; flex-direction: column; gap: 8px;">
+        <select id="persona-select">
+            <option value="">-- Loading Personas --</option>
+        </select>
+        <button class="btn full-width" style="background:#00897b" onclick="applySelectedPersona()">Apply Selected Persona Only</button>
+    </div>
+    <div id="persona-warning" style="display:none; color: #ff5252; font-size: 12px; padding: 8px; border: 1px solid #ff5252; border-radius: 6px; margin-bottom: 12px;">
+        [!] Using unvalidated custom persona — Play Integrity risk
+    </div>
+
+    <div class="persona-banner">
+      <div class="name" id="p-name">Loading...</div>
+      <div class="fp" id="p-fp">...</div>
+    </div>
+  </div>
+
+  <!-- Current Device State -->
+  <div class="card">
+    <div class="card-title">
+      <span>📱 Current Device State</span>
+      <button class="btn" style="padding:4px 10px;font-size:11px;background:#3949ab" onclick="refresh()">↻ Refresh</button>
+    </div>
+    <div class="row"><span class="k">SDK</span><span class="v" id="f-sdk">…</span></div>
+    <div class="row"><span class="k">Brand/Model</span><span class="v" id="f-model">…</span></div>
+    <div class="row"><span class="k">Serial</span><span class="v" id="f-serial">…</span></div>
+    <div class="row"><span class="k">Android ID</span><span class="v" id="f-android_id">…</span></div>
+    <div class="row"><span class="k">GAID</span><span class="v" id="f-gaid">…</span></div>
+    <div class="row"><span class="k">Hostname</span><span class="v" id="f-hostname">…</span></div>
+    <div class="row"><span class="k">BT Name</span><span class="v" id="f-bt_name">…</span></div>
+    <div class="row"><span class="k">Root</span><span class="v" id="f-root_manager">…</span></div>
+    <div class="row"><span class="k">Stealth Engine</span><span class="v" id="f-rp_mode">…</span></div>
+  </div>
+
+  <!-- Active Personas -->
+  <div class="card">
+    <div class="card-title"><span>🧬 Active Personas (<span id="persona-count">0</span>)</span></div>
+    <div id="persona-list">
+      <div style="color:#8b95b7;font-size:12px;text-align:center;padding:16px">Belum ada persona. Run FRESH IDENTITY.</div>
+    </div>
+  </div>
+
+  <!-- ONE BIG ACTION -->
+  <div class="card">
+    <button class="btn primary full-width" id="btn-fresh" style="padding:28px 16px;font-size:17px;line-height:1.4" onclick="confirmRunFresh()">
+      🚀 FRESH IDENTITY<br>
+      <span style="font-size:11px;opacity:0.85;font-weight:400">Persona + new IDs + wipe target apps (1-click)</span>
+    </button>
+    <div class="btn-grid" style="margin-top:8px">
+      <button class="btn" style="background:#37474f" onclick="confirmRun('restore_build','Restore build properties dari extended snapshot?')">↩️ Restore Build</button>
+      <button class="btn" style="background:#37474f" onclick="confirmRun('reboot','Reboot device sekarang?')">🔄 Reboot</button>
+    </div>
+  </div>
+
+  <!-- Settings -->
+  <div class="card" id="settings-card">
+    <div class="card-title">
+      <span>⚙️ Settings (sett.txt)</span>
+      <button class="btn" style="padding:4px 10px;font-size:11px;background:#3949ab" onclick="loadSettings()">↻ Reload</button>
+    </div>
+    <div id="settings-list"><div style="color:#8b95b7;font-size:12px;text-align:center;padding:12px">Memuat…</div></div>
+  </div>
+
+  <!-- Console -->
+  <div class="card">
+    <div class="card-title">
+      <span>📜 Console</span>
+      <button class="btn" style="padding:4px 10px;font-size:11px;background:#37474f" onclick="clearLog()">Clear</button>
+    </div>
+    <div class="console" id="console"></div>
+  </div>
+
+  <div style="text-align:center;color:#5a6280;font-size:11px;padding:16px">
+    Ternak Device Changer v4.12 — by ilham<br>Android 15 · KSU / APatch / Magisk · resetprop-rs
+  </div>
+</div>
+<div class="status-pill" id="statusPill"></div>
+<script>
+const ALLOWED_CMDS = [
+  'info','fresh','persona','personas_list','personas_active','restore_build',
+  'burn','burn_all','aid','gaid','mac','deep_wipe','backup','verify',
+  'preflight','diag','unfresh','reboot','settings_get','settings_set'
+];
+const ALLOWED_PKGS = ['com.shopee.id','com.tokopedia.tkpd','com.ss.android.ugc.trill'];
+let SCRIPT_PATH = null;
+
+function detectScriptPath() {
+  try {
+    const m = window.location.href.match(/(\/data\/adb\/modules\/[^/]+)\//);
+    if (m) { SCRIPT_PATH = m[1] + '/ternak_core_v4.sh'; logMsg('[i] Script: ' + SCRIPT_PATH, 'info'); return; }
+  } catch(e) {}
+  SCRIPT_PATH = '/data/adb/modules/ternak_device_changer/ternak_core_v4.sh';
+  logMsg('[!] Fallback: ' + SCRIPT_PATH, 'warn');
+}
+function esc(s) { return String(s).replace(/[^a-zA-Z0-9._:/\-]/g, ''); }
+function logMsg(msg, cls) {
+  const c = document.getElementById('console');
+  const t = new Date().toTimeString().substr(0,8);
+  c.innerHTML += '<span class="' + (cls||'') + '">[' + t + '] ' + msg + '</span>\n';
+  c.scrollTop = c.scrollHeight;
+}
+function clearLog() { document.getElementById('console').innerHTML = ''; }
+function showStatus(text, dur) {
+  const p = document.getElementById('statusPill');
+  p.textContent = text; p.classList.add('show');
+  setTimeout(() => p.classList.remove('show'), dur || 2500);
+}
+function ksuExec(cmd, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    if (typeof ksu === 'undefined' || !ksu.exec) {
+      logMsg('[SIM] ' + cmd, 'warn');
+      resolve({ errno: 0, stdout: 'simulation', stderr: '' }); return;
+    }
+    const cbName = 'ksuCb_' + Date.now() + '_' + Math.floor(Math.random()*10000);
+    let timer = null;
+    window[cbName] = function(errno, stdout, stderr) {
+      if (timer) clearTimeout(timer); delete window[cbName];
+      resolve({ errno, stdout, stderr });
+    };
+    timer = setTimeout(() => { delete window[cbName]; reject(new Error('Timeout')); }, timeoutMs || 120000);
+    try { ksu.exec(cmd, JSON.stringify({}), cbName); }
+    catch(e) { if (timer) clearTimeout(timer); delete window[cbName]; reject(e); }
+  });
+}
+
+// runSh: helper untuk command yang return stdout (JSON etc), tanpa logging tiap line
+async function runSh(cmdArgs, timeoutMs) {
+  const r = await ksuExec('sh ' + SCRIPT_PATH + ' ' + cmdArgs, timeoutMs || 30000);
+  return r.stdout || '';
+}
+
+async function runCmd(cmd, arg) {
+  if (!ALLOWED_CMDS.includes(cmd)) { logMsg('[ERR] cmd not allowed: ' + cmd, 'err'); return; }
+  if (arg) {
+    // Per-command arg validation
+    if (['burn'].includes(cmd)) {
+      if (!ALLOWED_PKGS.includes(arg)) { logMsg('[ERR] pkg not allowed: ' + arg, 'err'); return; }
+    } else if (['fresh','persona'].includes(cmd)) {
+      if (!/^[a-zA-Z0-9_/-]+$/.test(arg)) { logMsg('[ERR] persona name invalid: ' + arg, 'err'); return; }
+    } else if (['aid','gaid','mac'].includes(cmd)) {
+      if (!/^[a-zA-Z0-9:.-]+$/.test(arg)) { logMsg('[ERR] arg invalid: ' + arg, 'err'); return; }
+    }
+  }
+  let cmdline = 'sh ' + SCRIPT_PATH + ' ' + esc(cmd);
+  if (arg) cmdline += ' ' + esc(arg);
+  logMsg('[▶] ' + cmdline, 'info');
+  showStatus('Running: ' + cmd, 300000);
+  const allBtns = document.querySelectorAll('button.btn');
+  const wasDisabled = [];
+  allBtns.forEach((b, i) => { wasDisabled[i] = b.disabled; b.disabled = true; });
+  try {
+    const r = await ksuExec(cmdline, 300000);
+    if (r.stdout) r.stdout.split('\n').forEach(line => {
+      if (!line.trim()) return;
+      let cls = '';
+      if (line.includes('[+]')) cls = 'ok';
+      else if (line.includes('[-]')) cls = 'err';
+      else if (line.includes('[!]')) cls = 'warn';
+      else if (line.includes('[i]') || line.includes('[...]')) cls = 'info';
+      logMsg(line, cls);
+    });
+    if (r.stderr && r.stderr.trim()) logMsg('[stderr] ' + r.stderr, 'warn');
+    if (r.errno !== 0) logMsg('[exit] ' + r.errno, 'err');
+    else logMsg('[✓] DONE: ' + cmd, 'ok');
+    if (['fresh','burn','burn_all','persona','restore_build'].includes(cmd)) setTimeout(refresh, 800);
+  } catch(e) { logMsg('[ERR] ' + e.message, 'err'); showStatus('Error', 4000); }
+  finally {
+    allBtns.forEach((b, i) => { b.disabled = wasDisabled[i]; });
+    showStatus('Ready', 1500);
+  }
+}
+
+// Custom in-page confirm modal — KSU WebUI viewer disable native window.confirm().
+function customConfirm(msg) {
+  return new Promise(resolve => {
+    const ov = document.createElement('div');
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.75);display:flex;align-items:center;justify-content:center;z-index:9999;padding:20px;';
+    const box = document.createElement('div');
+    box.style.cssText = 'background:#161b2e;border:1px solid #2a3147;border-radius:12px;padding:20px;max-width:420px;width:100%;color:#e4e6eb;box-shadow:0 8px 32px rgba(0,0,0,0.5);';
+    const msgDiv = document.createElement('div');
+    msgDiv.style.cssText = 'font-size:13px;line-height:1.6;margin-bottom:18px;white-space:pre-wrap;color:#e4e6eb;';
+    msgDiv.textContent = msg;
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;gap:8px;';
+    const cancel = document.createElement('button');
+    cancel.textContent = '✕ Batal';
+    cancel.style.cssText = 'flex:1;background:#37474f;color:#fff;border:0;padding:12px;border-radius:8px;font-weight:600;cursor:pointer;font-size:13px;';
+    const ok = document.createElement('button');
+    ok.textContent = '✓ Lanjut';
+    ok.style.cssText = 'flex:1;background:#00897b;color:#fff;border:0;padding:12px;border-radius:8px;font-weight:600;cursor:pointer;font-size:13px;';
+    const close = (v) => { try { document.body.removeChild(ov); } catch(e){} resolve(v); };
+    cancel.onclick = () => close(false);
+    ok.onclick = () => close(true);
+    ov.onclick = (e) => { if (e.target === ov) close(false); };
+    row.appendChild(cancel); row.appendChild(ok);
+    box.appendChild(msgDiv); box.appendChild(row);
+    ov.appendChild(box); document.body.appendChild(ov);
+  });
+}
+
+async function confirmRunFresh() {
+    const sel = document.getElementById('persona-select');
+    const val = sel.value || '';
+    const arg = val.replace('custom/', '');
+    const msg = 'FRESH IDENTITY:\n\n• Persona: ' + (arg || '(none — default fresh)') +
+                '\n• New ANDROID_ID + GAID + MAC' +
+                '\n• Random BT name (+ restart BT)' +
+                '\n• Wipe Shopee / Tokopedia / TikTok' +
+                '\n• Reset Firebase + GSF + MediaDrm' +
+                '\n• Clear network + forensic traces' +
+                '\n\nLanjut?';
+    if (await customConfirm(msg)) {
+        runCmd('fresh', arg);
+    }
+}
+
+async function confirmRun(cmd, msg) {
+  if (await customConfirm(msg)) runCmd(cmd);
+}
+async function burnPersona(pkg) {
+  if (!ALLOWED_PKGS.includes(pkg)) return;
+  if (await customConfirm('Burn ' + pkg + '?\n\nAkun lama hilang, app di-clear.')) runCmd('burn', pkg);
+}
+
+async function refresh() {
+  showStatus('Refreshing…');
+  try {
+    const r = await ksuExec('sh ' + SCRIPT_PATH + ' info', 15000);
+    const d = JSON.parse(r.stdout.trim());
+    document.getElementById('p-name').textContent = d.profile || '—';
+    document.getElementById('p-fp').textContent = d.fingerprint || '—';
+    document.getElementById('f-sdk').textContent = d.sdk;
+    document.getElementById('f-model').textContent = d.brand + ' / ' + d.model;
+    document.getElementById('f-serial').textContent = d.serial;
+    document.getElementById('f-android_id').textContent = d.android_id;
+    document.getElementById('f-gaid').textContent = d.gaid;
+    document.getElementById('f-hostname').textContent = d.hostname;
+    document.getElementById('f-bt_name').textContent = d.bt_name;
+    document.getElementById('f-root_manager').textContent = d.root_manager;
+    const rpMode = d.modules.resetprop_mode;
+    const rpModeText = rpMode === 'rs' ? '🥷 resetprop-rs (stealth)' : rpMode === 'legacy' ? '⚠️ legacy resetprop' : '✕ none (system.prop only)';
+    document.getElementById('f-rp_mode').textContent = rpModeText;
+    const badges = document.getElementById('moduleBadges');
+    badges.innerHTML = '';
+    const addBadge = (label, ok, cls) => {
+      const b = document.createElement('span');
+      b.className = 'badge ' + (cls || (ok ? 'ok' : 'err'));
+      b.textContent = (ok ? '✓ ' : '✕ ') + label;
+      badges.appendChild(b);
+    };
+    addBadge(d.root_manager, true, 'ok');
+    addBadge('SDK ' + d.sdk, true, parseInt(d.sdk) >= 35 ? 'ok' : 'warn');
+    if (d.modules.resetprop_mode === 'rs') addBadge('🥷 Stealth', true, 'ok');
+    else if (d.modules.resetprop) addBadge('resetprop legacy', true, 'warn');
+    else addBadge('resetprop', false);
+    if (d.modules.pif) addBadge('PIF active', true, 'warn');
+    if (d.modules.specter) addBadge('Specter', true, 'ok');
+    else addBadge('No Specter', false, 'warn');
+    document.getElementById('persona-count').textContent = d.persona_count;
+  } catch(e) { logMsg('[ERR] info: ' + e.message, 'err'); }
+
+  try {
+    const r = await ksuExec('sh ' + SCRIPT_PATH + ' personas_active', 5000);
+    const list = JSON.parse(r.stdout.trim() || '[]');
+    const c = document.getElementById('persona-list');
+    if (!list.length) {
+      c.innerHTML = '<div style="color:#8b95b7;font-size:12px;text-align:center;padding:16px">Belum ada persona. Run FRESH IDENTITY.</div>';
+    } else {
+      c.innerHTML = '';
+      list.forEach(p => {
+        const div = document.createElement('div');
+        div.className = 'persona-item';
+        div.innerHTML = '<div><div class="pkg">' + p.package + '</div><div class="meta">' + (p.profile||'?') + ' · AID: ' + (p.androidId||'').substr(0,12) + '… · ' + p.ageDays + 'd</div></div><button onclick="burnPersona(\'' + p.package + '\')">🔥 Burn</button>';
+        c.appendChild(div);
+      });
+    }
+  } catch(e) { logMsg('[ERR] personas_active: ' + e.message, 'err'); }
+  showStatus('Ready', 1500);
+}
+
+// Persona dropdown loader
+async function loadPersonasList() {
+  try {
+    const jsonStr = await runSh('personas_list', 8000);
+    const data = JSON.parse(jsonStr.trim());
+    const sel = document.getElementById('persona-select');
+    sel.innerHTML = '<option value="">-- Select Persona --</option>';
+
+    if (data.validated && data.validated.length > 0) {
+        const og = document.createElement('optgroup');
+        og.label = 'Validated';
+        data.validated.forEach(p => {
+            const opt = document.createElement('option');
+            opt.value = p;
+            opt.textContent = p;
+            og.appendChild(opt);
+        });
+        sel.appendChild(og);
+    }
+
+    if (data.custom && data.custom.length > 0) {
+        const cg = document.createElement('optgroup');
+        cg.label = 'Custom (Unvalidated)';
+        data.custom.forEach(p => {
+            const opt = document.createElement('option');
+            opt.value = 'custom/' + p;
+            opt.textContent = p;
+            cg.appendChild(opt);
+        });
+        sel.appendChild(cg);
+    }
+
+    sel.addEventListener('change', function() {
+        const warn = document.getElementById('persona-warning');
+        if (this.value.startsWith('custom/')) {
+            warn.style.display = 'block';
+        } else {
+            warn.style.display = 'none';
+        }
+    });
+
+  } catch (e) {
+    logMsg('[ERR] personas_list: ' + e.message, 'err');
+    document.getElementById('persona-select').innerHTML = '<option value="">Error loading personas</option>';
+  }
+}
+
+async function applySelectedPersona() {
+    const sel = document.getElementById('persona-select');
+    const val = sel.value;
+    if (!val) {
+        showStatus('Pilih persona dulu', 3000);
+        return;
+    }
+    const arg = val.replace('custom/', '');
+    if (await customConfirm('Apply persona: ' + arg + '?\n\nBuild props akan di-spoof.\nRun FRESH IDENTITY setelahnya buat identity full-refresh.')) {
+        await runCmd('persona', arg);
+    }
+}
+
+// Settings (sett.txt) — load & toggle
+const SETT_META = {
+  ENABLE_SPOOF_PERSONA:  { label: 'Persona Spoof',      group: 'Identitas',  desc: 'Ganti brand/model/fingerprint' },
+  ENABLE_ANDROID_ID:     { label: 'Android ID',          group: 'Identitas',  desc: 'Randomize ANDROID_ID + wipe SSAID' },
+  ENABLE_GAID:           { label: 'GAID',                group: 'Identitas',  desc: 'Randomize Google Advertising ID' },
+  ENABLE_MAC_RANDOM:     { label: 'MAC Random',          group: 'Identitas',  desc: 'Randomize MAC address wlan0' },
+  ENABLE_BT_NAME:        { label: 'BT Name',             group: 'Identitas',  desc: 'Randomize nama Bluetooth + restart BT' },
+  ENABLE_HOSTNAME:       { label: 'Hostname',            group: 'Identitas',  desc: 'Ubah net.hostname' },
+  ENABLE_CLEAR_APPS:     { label: 'Clear Apps',          group: 'Wipe',       desc: 'pm clear Shopee / Tokopedia / TikTok' },
+  ENABLE_WIPE_SDCARD:    { label: 'Wipe SDcard',         group: 'Wipe',       desc: 'Hapus /sdcard/Android/data/<pkg>' },
+  ENABLE_WIPE_FIREBASE:  { label: 'Wipe Firebase',       group: 'Wipe',       desc: 'Wipe Firebase Installation ID' },
+  ENABLE_WIPE_MEDIADRM:  { label: 'Wipe MediaDrm',       group: 'Wipe',       desc: 'Reset MediaDrm L3' },
+  ENABLE_RESET_GSF:      { label: 'Reset GSF',           group: 'Wipe',       desc: 'Reset Google Services Framework ID' },
+  ENABLE_CLEAR_NETWORK:  { label: 'Clear Network',       group: 'Wipe',       desc: 'Wipe network caches + DNS' },
+  ENABLE_WIPE_FORENSIC:  { label: 'Wipe Forensic',       group: 'Wipe',       desc: 'Hapus tombstone/dropbox/recent' },
+  ENABLE_WIPE_CLIPBOARD: { label: 'Wipe Clipboard',      group: 'Wipe',       desc: 'Bersihkan clipboard' },
+  ENABLE_BACKUP:         { label: 'Backup',              group: 'Lain-lain',  desc: 'Backup state sebelum FRESH' },
+  ENABLE_PERSONAS:       { label: 'Personas',            group: 'Lain-lain',  desc: 'Simpan persona snapshot per-app' },
+  FORCE_APPLY:           { label: 'Force Apply (PIF)',   group: 'Lain-lain',  desc: 'Paksa persona meski PIF aktif' },
+};
+let _settData = {};
+
+async function loadSettings() {
+  const container = document.getElementById('settings-list');
+  container.innerHTML = '<div style="color:#8b95b7;font-size:12px;text-align:center;padding:12px">Memuat…</div>';
+  try {
+    const r = await ksuExec('sh ' + SCRIPT_PATH + ' settings_get', 8000);
+    const raw = (r.stdout.match(/\{[\s\S]*\}/) || ['{}'])[0];
+    _settData = JSON.parse(raw);
+  } catch(e) {
+    logMsg('[ERR] settings_get: ' + e.message, 'err');
+    _settData = {};
+  }
+  renderSettings(container);
+}
+
+function renderSettings(container) {
+  container.innerHTML = '';
+  const groups = {};
+  for (const [key, meta] of Object.entries(SETT_META)) {
+    if (!groups[meta.group]) groups[meta.group] = [];
+    groups[meta.group].push({ key, ...meta });
+  }
+  for (const [gname, items] of Object.entries(groups)) {
+    const gt = document.createElement('div');
+    gt.className = 'sett-group-title'; gt.textContent = gname;
+    container.appendChild(gt);
+    items.forEach(({ key, label, desc }) => {
+      const val = (_settData[key] || 'true').toLowerCase() === 'true';
+      const row = document.createElement('div');
+      row.className = 'sett-row';
+      const id = 'sett-' + key;
+      row.innerHTML =
+        '<div class="sk">' +
+          '<div>' + label + '</div>' +
+          '<div class="sdesc">' + desc + '</div>' +
+        '</div>' +
+        '<label class="toggle">' +
+          '<input type="checkbox" id="' + id + '" ' + (val ? 'checked' : '') + ' onchange="toggleSett(\'' + key + '\', this.checked)">' +
+          '<span class="slider"></span>' +
+        '</label>';
+      container.appendChild(row);
+    });
+  }
+}
+
+async function toggleSett(key, checked) {
+  const val = checked ? 'true' : 'false';
+  logMsg('[i] Setting ' + key + ' → ' + val, 'info');
+  try {
+    const r = await ksuExec('sh ' + SCRIPT_PATH + ' settings_set ' + key + ' ' + val, 8000);
+    if (r.errno !== 0) {
+      logMsg('[ERR] settings_set: ' + r.stderr, 'err');
+      const el = document.getElementById('sett-' + key);
+      if (el) el.checked = !checked;
+    } else {
+      _settData[key] = val;
+      logMsg('[+] ' + key + '=' + val, 'ok');
+      showStatus(key + ' → ' + (checked ? 'ON' : 'OFF'));
+    }
+  } catch(e) {
+    logMsg('[ERR] toggle: ' + e.message, 'err');
+    const el = document.getElementById('sett-' + key);
+    if (el) el.checked = !checked;
+  }
+}
+
+window.addEventListener('load', () => {
+  logMsg('=== Ternak v4.12 WebUI loaded (safe-subset · stealth · persona) ===', 'info');
+  detectScriptPath();
+  refresh();
+  loadPersonasList();
+  loadSettings();
+});
+</script>
+</body>
+</html>
