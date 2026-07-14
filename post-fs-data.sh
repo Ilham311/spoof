@@ -37,12 +37,12 @@ fi
 . "${MODDIR}/common/persona_freeze.sh"
 
 # Resolve resetprop
-RESETPROP="$(command -v resetprop 2>/dev/null)"
-for C in /data/adb/ksu/bin/resetprop /data/adb/ap/bin/resetprop /data/adb/magisk/resetprop; do
+RESETPROP="$(command -v resetprop-rs 2>/dev/null)"
+for C in "$MODDIR/bin/resetprop-rs" /data/adb/ksu/bin/resetprop /data/adb/ap/bin/resetprop /data/adb/magisk/resetprop; do
     [ -n "$RESETPROP" ] && break
     [ -x "$C" ] && RESETPROP="$C"
 done
-[ -n "$RESETPROP" ] || { log "ERROR: resetprop not found"; exit 0; }
+[ -n "$RESETPROP" ] || { log "ERROR: resetprop-rs (and resetprop) not found"; exit 0; }
 log "resetprop: $RESETPROP"
 
 apply_prop() {

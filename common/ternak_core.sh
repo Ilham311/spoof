@@ -284,8 +284,9 @@ restore_build() {
     [ -f "$F" ] || { echo "no backup found" >&2; return 1; }
     log "restoring from: $F"
 
-    local RESETPROP="$(command -v resetprop 2>/dev/null)"
-    [ -n "$RESETPROP" ] || RESETPROP=/data/adb/magisk/resetprop
+    local RESETPROP="$(command -v resetprop-rs 2>/dev/null)"
+    [ -n "$RESETPROP" ] || RESETPROP="$MODDIR/bin/resetprop-rs"
+    [ -x "$RESETPROP" ] || RESETPROP=/data/adb/magisk/resetprop
     [ -x "$RESETPROP" ] || { echo "resetprop not found" >&2; return 1; }
 
     # Parse JSON with awk (no jq guaranteed)
@@ -350,7 +351,8 @@ preflight() {
     done
 
     # resetprop
-    command -v resetprop >/dev/null 2>&1 || \
+    command -v resetprop-rs >/dev/null 2>&1 || \
+        [ -x "$MODDIR/bin/resetprop-rs" ] || \
         [ -x /data/adb/magisk/resetprop ] || \
         [ -x /data/adb/ksu/bin/resetprop ] || \
         [ -x /data/adb/ap/bin/resetprop ] || \
