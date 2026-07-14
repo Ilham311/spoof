@@ -1,0 +1,2 @@
+#!/system/bin/sh
+exec /data/adb/modules/ternak_device_changer/common/ternak_core.sh "$@"
