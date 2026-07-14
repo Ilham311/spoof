@@ -1,0 +1,18 @@
+# Pixel 7 Pro dengan serial yang di-freeze per activation
+ro.product.brand=google
+ro.product.device=cheetah
+ro.product.manufacturer=Google
+ro.product.model=Pixel 7 Pro
+ro.product.name=cheetah
+ro.build.fingerprint=google/cheetah/cheetah:16/CP1A.260405.005/15001963:user/release-keys
+ro.build.id=CP1A.260405.005
+ro.build.version.incremental=15001963
+ro.build.version.security_patch=2026-04-05
+ro.build.type=user
+ro.build.tags=release-keys
+
+# Token: di-resolve saat activate, freeze ke resolved_persona.txt,
+# stabil untuk boot berikutnya sampai persona swap
+ro.serialno=${RANDOM_SERIAL}
+ro.boot.serialno=${RANDOM_SERIAL}
+ro.bootloader=cheetah-1.2-${RANDOM_HEX:8}
