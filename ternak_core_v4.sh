@@ -6,18 +6,41 @@
 # REWRITTEN FOR SECURITY, PERFORMANCE & STABILITY
 # ============================================================
 
-VERSION="4.12.4-a15-rs"
+VERSION="4.14.0-a15-rs"
 
 MODDIR="${MODDIR:-$(cd "$(dirname "$0")" 2>/dev/null && pwd)}"
 [ -z "$MODDIR" ] && MODDIR="/data/adb/modules/ternak_device_changer"
 
+# NEW: persistent state outside module dir (survives reinstall)
+DATA_DIR="/data/adb/ternak_device_changer"
+STATE_DIR="$DATA_DIR/state"
+SSAID_STATE_DIR="$DATA_DIR/ssaid_backup"
+SSAID_TARGETS_FILE="$STATE_DIR/ssaid_targets.conf"
+SSAID_VALUE_FILE="$STATE_DIR/ssaid_value.txt"
+GAID_VALUE_FILE="$STATE_DIR/gaid_value.txt"
+
+# Keep MODDIR-based paths for persona files & logs (read-only, shipped in module)
 PERSONA_DIR="$MODDIR/personas"
-LOG_DIR="$MODDIR/logs"
-BACKUP_DIR_ROOT="$MODDIR/backups"
-STATE_DIR="$MODDIR/state"
-ACTIVE_PERSONA_FILE="$STATE_DIR/active_persona.txt"
+LOG_DIR="$DATA_DIR/logs"       # moved to DATA_DIR
+BACKUP_DIR_ROOT="$DATA_DIR/backups"  # moved to DATA_DIR
+ACTIVE_PERSONA_FILE="$STATE_DIR/active_persona.txt"  # moved to DATA_DIR
+LOCKFILE="$STATE_DIR/.lock"
 SYSPROP_FILE="$MODDIR/system.prop"
 SETTINGS_FILE="$MODDIR/sett.txt"
+
+mkdir -p "$DATA_DIR" "$STATE_DIR" "$LOG_DIR" "$BACKUP_DIR_ROOT" "$SSAID_STATE_DIR" 2>/dev/null
+chmod 700 "$DATA_DIR" "$STATE_DIR" "$LOG_DIR" "$BACKUP_DIR_ROOT" "$SSAID_STATE_DIR" 2>/dev/null
+
+# Migrate from v4.13.0 paths if legacy state exists
+LEGACY_STATE="$MODDIR/state"
+if [ -d "$LEGACY_STATE" ] && [ ! -f "$STATE_DIR/.migrated" ]; then
+    cp -a "$LEGACY_STATE/." "$STATE_DIR/" 2>/dev/null
+    touch "$STATE_DIR/.migrated"
+    log_ok "Migrated v4.13.0 state → $STATE_DIR"
+fi
+
+# Source surgical SSAID helper
+[ -f "$MODDIR/common/ssaid_surgical.sh" ] && . "$MODDIR/common/ssaid_surgical.sh"
 
 _PIF_MANAGED_KEYS_RE='^(ro\.product\.(brand|manufacturer|model|name|device)|ro\.build\.(fingerprint|id|tags|type|display\.id))$'
 
@@ -256,6 +279,52 @@ _load_real_sdk() {
     return 0
 }
 
+# Fix v4.14 - fail-closed safety allowlist
+is_safe_identity_prop() {
+    case "$1" in
+        ro.product.brand|ro.product.manufacturer|ro.product.model|\
+        ro.product.name|ro.product.device|ro.product.board|\
+        ro.product.system.*|ro.product.system_ext.*|ro.product.product.*|\
+        ro.product.vendor.*|ro.product.odm.*) return 0 ;;
+        ro.build.fingerprint|ro.build.id|ro.build.display.id|\
+        ro.build.version.incremental|ro.build.version.security_patch|\
+        ro.build.version.release|ro.build.version.codename|\
+        ro.build.type|ro.build.tags|ro.build.description|\
+        ro.build.flavor|ro.build.product|ro.build.characteristics) return 0 ;;
+        ro.product.build.*|ro.system.build.*|ro.system_ext.build.*|\
+        ro.vendor.build.*|ro.odm.build.*|ro.bootimage.build.*) return 0 ;;
+        ro.vendor.product.*|ro.vendor.build.security_patch) return 0 ;;
+        ro.serialno|ro.boot.serialno|ro.bootloader|\
+        ro.boot.hwname|ro.boot.hwdevice|ro.product.hardware.sku|\
+        ro.boot.product.hardware.sku|ro.build.device_family|\
+        vendor.usb.product_string) return 0 ;;
+        ro.soc.model|ro.soc.manufacturer|ro.product.first_api_level) return 0 ;;
+    esac
+    return 1
+}
+
+# Fix v4.14 - resolve ${RANDOM_HEX:N} and ${RANDOM_SERIAL} in persona values
+resolve_persona_value() {
+    local v="$1" tok len rep
+    while :; do
+        case "$v" in
+            *'${RANDOM_HEX:'*'}'*)
+                tok=$(printf '%s' "$v" | sed -n 's/.*\(\${RANDOM_HEX:[0-9]*}\).*/\1/p')
+                [ -z "$tok" ] && break
+                len=$(printf '%s' "$tok" | sed 's/${RANDOM_HEX:\([0-9]*\)}/\1/')
+                rep=$(generate_hex "$len")
+                v="${v%%"$tok"*}${rep}${v#*"$tok"}"
+                ;;
+            *'${RANDOM_SERIAL}'*)
+                rep=$(generate_serial)
+                v="${v%%'${RANDOM_SERIAL}'*}${rep}${v#*'${RANDOM_SERIAL}'}"
+                ;;
+            *) break ;;
+        esac
+    done
+    printf '%s' "$v"
+}
+
 spoof_build_persona() {
     local persona="$1"
     shift
@@ -325,6 +394,16 @@ spoof_build_persona() {
             continue
         fi
 
+        # v4.14 - safety allowlist (fail-closed)
+        if ! is_safe_identity_prop "$key"; then
+            log_warn "persona '$persona': $key rejected (not in identity allowlist)"
+            skipped=$((skipped+1))
+            continue
+        fi
+
+        # v4.14 - resolve tokens
+        val="$(resolve_persona_value "$val")"
+
         before="$(rprop_get "$key")"
         if [ "$before" = "$val" ]; then
             skipped=$((skipped+1))
@@ -343,6 +422,24 @@ spoof_build_persona() {
 
     log_ok "Persona applied=$applied skipped=$skipped skipped_pif=$skipped_pif errs=$errs"
     echo "$persona" > "$ACTIVE_PERSONA_FILE"
+    _freeze_persona_snapshot "$pfile"
+}
+
+# v4.14 - freeze resolved values for next-boot pre-zygote apply
+_freeze_persona_snapshot() {
+    local pfile="$1" out="$STATE_DIR/resolved_persona.txt"
+    : > "$out"
+    while IFS= read -r line || [ -n "$line" ]; do
+        line="$(strip_inline_comment "$line")"
+        case "$(trim_ws "$line")" in ''|\#*) continue ;; esac
+        local k v
+        k="$(trim_ws "${line%%=*}")"; v="$(trim_ws "${line#*=}")"
+        [ -z "$k" ] || [ -z "$v" ] && continue
+        is_safe_identity_prop "$k" || continue
+        v="$(resolve_persona_value "$v")"
+        echo "$k=$v" >> "$out"
+    done < "$pfile"
+    chmod 600 "$out" 2>/dev/null
 }
 
 # === Identifiers ===
@@ -353,15 +450,16 @@ set_android_id_global() {
     log_ok "Global ANDROID_ID: $newid"
 }
 
-wipe_ssaid() {
-    log_step "Wipe SSAID per-app..."
-    force_stop com.android.settings
-    se_permissive
-    for u in $(get_users); do
-        rm -f "/data/system/users/$u/settings_ssaid.xml"* 2>/dev/null
-    done
-    se_restore
-    log_ok "SSAID wiped"
+# v4.14 - surgical SSAID replacing nuclear wipe
+apply_ssaid_new() {
+    local new_ssaid="${1:-$(generate_hex 16)}"
+    local targets="${2:-$TARGET_APPS}"
+
+    # Write config for post-fs-data next boot AND CLI immediate apply
+    ssaid_write_config "$new_ssaid" $targets
+    ssaid_apply_now
+    log_ok "SSAID configured: $new_ssaid (targets: $targets)"
+    log_info "Full effect on next boot (or force-stop target apps now)"
 }
 
 set_gaid_value() {
@@ -393,6 +491,10 @@ EOF
     settings_put global advertising_id "$newgaid"
     se_restore
     log_ok "GAID set: $newgaid"
+
+    # v4.14 - freeze GAID for next-boot pre-zygote apply
+    printf '%s' "$newgaid" > "$GAID_VALUE_FILE"
+    chmod 600 "$GAID_VALUE_FILE" 2>/dev/null
 }
 
 randomize_wlan_mac() {
@@ -613,7 +715,7 @@ burn_persona() {
     rm -f /data/data/$pkg/shared_prefs/PersistedInstallation.* /data/data/$pkg/files/PersistedInstallation.* 2>/dev/null
     se_restore
     set_gaid_value
-    wipe_ssaid
+    apply_ssaid_new "$(generate_hex 16)" "$TARGET_APPS"
     restore_build
     save_persona_snapshot "$pkg"
     log_ok "$pkg burnt"
@@ -658,7 +760,7 @@ do_fresh() {
     is_on "$ENABLE_RESET_GSF"     && reset_gsf_id
 
     if is_on "$ENABLE_ANDROID_ID"; then
-        wipe_ssaid
+        apply_ssaid_new "$(generate_hex 16)" "$TARGET_APPS"
         set_android_id_global "$(generate_hex 16)"
     fi
     is_on "$ENABLE_GAID"          && set_gaid_value "$(generate_uuid)"
@@ -789,7 +891,17 @@ case "$1" in
     preflight)   preflight ;;
     burn)        preflight; [ -z "$2" ] && { log_err "Usage: burn <pkg>"; exit 1; }; burn_persona "$2" ;;
     burn_all)    preflight; for pkg in $TARGET_APPS; do burn_persona "$pkg"; done ;;
-    aid)         preflight; wipe_ssaid; set_android_id_global "$2" ;;
+    aid)         preflight; apply_ssaid_new "$(generate_hex 16)" "$TARGET_APPS"; set_android_id_global "$2" ;;
+    ssaid)
+        preflight
+        shift
+        local v="$1"; shift
+        [ "$v" = "new" ] && v="$(generate_hex 16)"
+        apply_ssaid_new "$v" "${*:-$TARGET_APPS}"
+        ;;
+    ssaid_revert)
+        preflight; ssaid_revert
+        ;;
     gaid)        preflight; set_gaid_value "$2" ;;
     mac)         preflight; randomize_wlan_mac "$2" ;;
     deep_wipe)   preflight; freeze_targets; wipe_mediadrm; reset_gsf_id; wipe_firebase_iid; clear_network_caches; wipe_forensic_traces ;;
@@ -836,9 +948,16 @@ case "$1" in
         ;;
     unfresh)
         [ "$(id -u)" -eq 0 ] || exit 1
+        preflight
+        restore_build
+        ssaid_revert
         rm -f "$SYSPROP_FILE" "$MODDIR/post-fs-data.sh" "$ACTIVE_PERSONA_FILE" 2>/dev/null
+        rm -f "$STATE_DIR/resolved_persona.txt" \
+              "$GAID_VALUE_FILE" \
+              "$SSAID_TARGETS_FILE" "$SSAID_VALUE_FILE" 2>/dev/null
         rm -f "$PERSONA_DIR"/*.json 2>/dev/null
-        log_ok "Unfresh done, reboot to restore original build." ;;
+        log_ok "Unfresh done - reboot recommended"
+        ;;
     reboot)      sync && reboot ;;
     *)
         echo "Ternak Device Changer Core Engine v$VERSION"
