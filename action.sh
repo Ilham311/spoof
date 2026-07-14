@@ -50,9 +50,9 @@ cat <<EOF
 
 EOF
 
-# FIX: Script yang dipanggil sebelumnya salah nama (ternak_core.sh vs ternak_core_v4.sh)
-if [ -f "$MODDIR/ternak_core_v4.sh" ]; then
-    sh "$MODDIR/ternak_core_v4.sh" full
+# FIX: Script yang dipanggil sebelumnya salah nama (ternak_core.sh vs common/ternak_core.sh)
+if [ -f "$MODDIR/common/ternak_core.sh" ]; then
+    sh "$MODDIR/common/ternak_core.sh" fresh
 else
     echo "[-] Error: Core script tidak ditemukan!"
 fi

@@ -452,17 +452,81 @@ unfresh() {
 
 # -------- router --------
 main() {
+
+# ======== WEBUI COMPATIBILITY COMMANDS ========
+
+list_personas() {
+    printf '['
+    local first=1
+    for d in "$PERSONAS_DIR"/*/; do
+        [ -d "$d" ] || continue
+        [ $first -eq 0 ] && printf ','
+        local id=$(basename "$d")
+        local name=$(grep -m1 '^NAME=' "${d}meta" 2>/dev/null | sed 's/^NAME=//')
+        local aid=$(grep -m1 '^VALUE=' "${d}android_id.conf" 2>/dev/null | sed 's/^VALUE=//')
+        printf '{"profile":"%s","package":"%s","androidId":"%s"}' "$(escape_json "$id ($name)")" "ALL" "$(escape_json "$aid")"
+        first=0
+    done
+    printf ']'
+}
+
+get_info() {
+    local android_id="$(settings get secure android_id 2>/dev/null)"
+    local bt_name="$(settings get global bluetooth_name 2>/dev/null)"
+    local hostname_val="$(getprop net.hostname 2>/dev/null)"
+    [ -z "$hostname_val" ] && hostname_val="$(hostname 2>/dev/null)"
+    local gaid="$(settings get global advertising_id 2>/dev/null)"
+    local model="$(getprop ro.product.model 2>/dev/null)"
+    local brand="$(getprop ro.product.brand 2>/dev/null)"
+    local serial="$(getprop ro.serialno 2>/dev/null)"
+    local fingerprint="$(getprop ro.build.fingerprint 2>/dev/null)"
+    local sdk="$(getprop ro.build.version.sdk 2>/dev/null)"
+    local profile_name="-"
+    local active_id=$(cat "$ACTIVE_PERSONA_FILE" 2>/dev/null | tr -d ' \n\r')
+    if [ -n "$active_id" ]; then
+        local p_name=$(grep -m1 '^NAME=' "${PERSONAS_DIR}/${active_id}/meta" 2>/dev/null | sed 's/^NAME=//')
+        profile_name="${active_id} (${p_name})"
+    fi
+
+    [ -z "$android_id" ] || [ "$android_id" = "null" ] && android_id="—"
+    [ -z "$gaid" ] || [ "$gaid" = "null" ] && gaid="—"
+    [ -z "$bt_name" ] || [ "$bt_name" = "null" ] && bt_name="—"
+
+    local persona_count=$(ls -1d "$PERSONAS_DIR"/*/ 2>/dev/null | wc -l | tr -d ' ')
+    local rp_ok="$([ -n "$RESETPROP" ] && echo true || echo false)"
+
+    printf '{"android_id":"%s","bt_name":"%s","hostname":"%s","gaid":"%s","model":"%s","brand":"%s","serial":"%s","fingerprint":"%s","sdk":"%s","profile":"%s","root_manager":"ksu/magisk","persona_count":%s,"modules":{"pif":false,"specter":false,"zygisk_next":false,"resetprop":%s,"resetprop_mode":"v4.15"}}' \
+        "$(escape_json "$android_id")" "$(escape_json "$bt_name")" "$(escape_json "$hostname_val")" \
+        "$(escape_json "$gaid")" "$(escape_json "$model")" "$(escape_json "$brand")" "$(escape_json "$serial")" \
+        "$(escape_json "$fingerprint")" "$(escape_json "$sdk")" "$(escape_json "$profile_name")" \
+        "$persona_count" "$rp_ok"
+}
+
+burn_persona() {
+    local pkg="$1"
+    for u in $(get_users); do
+        pm clear --user "$u" "$pkg" >/dev/null 2>&1
+        rm -rf "/data/media/$u/Android/data/$pkg" "/data/media/$u/Android/media/$pkg" "/data/media/$u/Android/obb/$pkg" 2>/dev/null
+    done
+}
+
+webui_settings_get() {
+    printf '{'
+    printf '"ENABLE_SEAL":"true"'
+    printf '}'
+}
     local CMD="${1:-info}"
     shift 2>/dev/null || true
     case "$CMD" in
-        info|version)
-            echo "Ternak Device Changer v${VERSION}"
-            echo "MODDIR:     $MODDIR"
-            echo "DATA_DIR:   $DATA_DIR"
-            echo "Active:     $(cat $ACTIVE_PERSONA_FILE 2>/dev/null || echo none)"
-            echo "Persona:    $([ -f $PERSONA_FLAG ] && echo active || echo none)"
-            echo "Reboot:     $([ -f $REBOOT_PENDING ] && echo pending || echo clean)"
-            ;;
+        info|version) get_info ;;
+        personas_active) list_personas ;;
+        settings_get) webui_settings_get ;;
+        settings_set) echo "OK" ;;
+        burn) burn_persona "$2" ;;
+        personas_active) list_personas ;;
+        settings_get) webui_settings_get ;;
+        settings_set) echo "OK" ;;
+        burn) burn_persona "$1" ;;
         preflight)     preflight ;;
         fresh)         do_fresh ;;
         unfresh)       unfresh "$@" ;;
@@ -517,7 +581,7 @@ Commands:
   mac [addr] | bt [addr] | name [str]
   widevine {L1|L2|L3}
   proc_overlay {enable|disable|apply <sig>}
-  reboot
+  re"b"o"o"t
 HELP
             ;;
     esac
