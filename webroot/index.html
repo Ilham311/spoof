@@ -153,9 +153,9 @@ let SCRIPT_PATH = null;
 function detectScriptPath() {
   try {
     const m = window.location.href.match(/(\/data\/adb\/modules\/[^/]+)\//);
-    if (m) { SCRIPT_PATH = m[1] + '/ternak_core_v4.sh'; logMsg('[i] Script: ' + SCRIPT_PATH, 'info'); return; }
+    if (m) { SCRIPT_PATH = m[1] + '/common/ternak_core.sh'; logMsg('[i] Script: ' + SCRIPT_PATH, 'info'); return; }
   } catch(e) {}
-  SCRIPT_PATH = '/data/adb/modules/ternak_device_changer/ternak_core_v4.sh';
+  SCRIPT_PATH = '/data/adb/modules/ternak_device_changer/common/ternak_core.sh';
   logMsg('[!] Fallback: ' + SCRIPT_PATH, 'warn');
 }
 function esc(s) { return String(s).replace(/[^a-zA-Z0-9._:/\-]/g, ''); }

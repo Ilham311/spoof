@@ -1,7 +1,7 @@
 id=ternak_device_changer
-name=Ternak Device Changer (WebUI)
-version=v5.0
-versionCode=5
-author=Ilham 
-description=Panel WebUI interaktif untuk mengacak Android ID, GAID, Device Name, serta wipe data e-commerce/socmed dengan log perbandingan live.
-updateJson=https://raw.githubusercontent.com/Ilham311/spoof/main/update.json
+name=Ternak Device Changer
+version=v4.15.0-dsl-integrated
+versionCode=41500
+author=diru768
+description=Aggressive device identity spoofer with DSL-integrated architecture: pre-zygote lifecycle, persistent state, ABX-aware SSAID, freeze-on-activate personas, fail-closed safety. Persona Pixel 7 Pro (cheetah).
+updateJson=
