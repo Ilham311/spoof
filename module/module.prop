@@ -1,7 +1,0 @@
-id=ternak_device_changer
-name=Ternak Device Changer (shell + Zygisk)
-version=v4.12+1.0.1FIX
-versionCode=1.0-FIX
-author=diru768
-description=Fresh identity forge (shell) + Zygisk Build.* spoof per-target-app. Deep-clear, resetprop-rs sealing, GAID/AID/SSAID/MAC/BT/hostname reset, per-app persona snapshots. Zygisk hook whitelist di hook_targets.txt.
-updateJson=
