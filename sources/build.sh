@@ -41,7 +41,7 @@ for abi in "${ABIS[@]}"; do
         -DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake" \
         -DANDROID_ABI="$abi" \
         -DANDROID_PLATFORM="android-$API" \
-        -DANDROID_STL=none \
+        -DANDROID_STL=c++_static \
         -DCMAKE_BUILD_TYPE=MinSizeRel
     cmake --build "build/$abi" -j
     cp "build/$abi/libternak_zygisk.so" "$OUT/$abi.so"
