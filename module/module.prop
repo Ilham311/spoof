@@ -5,3 +5,4 @@ versionCode=41200
 author=diru768
 description=Shell-level identity forge script merged with a Zygisk C++ companion that hooks android.os.Build fields per-target-app.
 updateJson=
+zygisk=yes
