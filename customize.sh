@@ -33,6 +33,7 @@ set_perm $MODPATH/bin/ternakctl-arm64    0 0 0755
 set_perm $MODPATH/bin/ternakctl-arm      0 0 0755
 set_perm $MODPATH/bin/ternakctl-x86_64   0 0 0755
 set_perm $MODPATH/bin/ternakctl-x86      0 0 0755
+set_perm $MODPATH/pool.json              0 0 0644
 
 if [ -f "$MODPATH/bin/resetprop-rs" ]; then
     set_perm $MODPATH/bin/resetprop-rs   0 0 0755

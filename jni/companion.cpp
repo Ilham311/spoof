@@ -57,6 +57,7 @@ static const char* MODE_FILE      = "/data/adb/modules/ternak_device_changer/ide
 static const char* PERSISTENT_BIN = "/data/adb/modules/ternak_device_changer/persistent_id.bin";
 static const char* HOOK_TARGETS   = "/data/adb/modules/ternak_device_changer/hook_targets.txt";
 static const char* RESETPROP      = "/data/adb/modules/ternak_device_changer/bin/resetprop-rs";
+static const char* POOL_FILE      = "/data/adb/modules/ternak_device_changer/pool.json";
 static const char* UDS_NAME       = "ternak.ctrl";   // abstract UDS namespace
 
 // ============================================================
@@ -179,26 +180,49 @@ struct Identity {
     }
 };
 
+static std::vector<std::map<std::string, std::string>> load_json_pool() {
+    std::vector<std::map<std::string, std::string>> pool;
+    std::string content = read_file(POOL_FILE);
+    if (content.empty()) return pool;
+
+    // Extremely lightweight, non-validating JSON parsing intended for simple array of objects
+    // Format expected: [{ "KEY": "VALUE", ... }, { ... }]
+    size_t pos = 0;
+    while ((pos = content.find('{', pos)) != std::string::npos) {
+        size_t end_obj = content.find('}', pos);
+        if (end_obj == std::string::npos) break;
+
+        std::map<std::string, std::string> entry;
+        size_t key_pos = pos;
+        while ((key_pos = content.find('"', key_pos)) != std::string::npos && key_pos < end_obj) {
+            size_t key_end = content.find('"', key_pos + 1);
+            if (key_end == std::string::npos || key_end > end_obj) break;
+            std::string key = content.substr(key_pos + 1, key_end - key_pos - 1);
+
+            size_t colon_pos = content.find(':', key_end);
+            if (colon_pos == std::string::npos || colon_pos > end_obj) break;
+
+            size_t val_pos = content.find('"', colon_pos);
+            if (val_pos == std::string::npos || val_pos > end_obj) break;
+            size_t val_end = content.find('"', val_pos + 1);
+            if (val_end == std::string::npos || val_end > end_obj) break;
+            std::string val = content.substr(val_pos + 1, val_end - val_pos - 1);
+
+            entry[key] = val;
+            key_pos = val_end + 1;
+        }
+        if (!entry.empty()) pool.push_back(entry);
+        pos = end_obj + 1;
+    }
+    return pool;
+}
+
 static Identity generate_identity(bool keep_id) {
     std::random_device rd;
     std::mt19937 gen(rd());
-    std::uniform_int_distribution<size_t> pick(0, PIXEL_POOL.size() - 1);
-    const PixelEntry& p = PIXEL_POOL[pick(gen)];
-
     Identity id;
-    id.kv["BRAND"]                  = "google";
-    id.kv["MANUFACTURER"]           = "Google";
-    id.kv["MODEL"]                  = p.model;
-    id.kv["DEVICE"]                 = p.device;
-    id.kv["PRODUCT"]                = p.product;
-    id.kv["BOARD"]                  = p.board;
-    id.kv["HARDWARE"]               = p.hardware;
-    id.kv["ID"]                     = p.id;
-    id.kv["INCREMENTAL"]            = p.incremental;
-    id.kv["RELEASE"]                = p.release;
-    id.kv["SDK_INT"]                = std::to_string(p.sdk);
-    id.kv["DEVICE_INITIAL_SDK_INT"] = std::to_string(p.sdk);
-    id.kv["SECURITY_PATCH"]         = p.security_patch;
+
+    // Default static fields
     id.kv["BOOTLOADER"]             = "unknown";
     id.kv["HOST"]                   = "abfarm-release";
     id.kv["USER"]                   = "android-build";
@@ -209,32 +233,68 @@ static Identity generate_identity(bool keep_id) {
         std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::system_clock::now().time_since_epoch()).count());
 
-    // FINGERPRINT
-    std::string channel =
-        std::string(p.product).find("_beta") != std::string::npos ? "CANARY" : "REL";
-    char fp[512];
-    snprintf(fp, sizeof(fp), "google/%s/%s:%s/%s/%s:user/release-keys",
-             p.product, p.device, channel.c_str(), p.id, p.incremental);
-    id.kv["FINGERPRINT"] = fp;
+    // 1. Try to load from pool.json
+    auto json_pool = load_json_pool();
+    if (!json_pool.empty()) {
+        std::uniform_int_distribution<size_t> pick(0, json_pool.size() - 1);
+        auto& p = json_pool[pick(gen)];
+        for (const auto& [k, v] : p) {
+            id.kv[k] = v;
+        }
 
-    // DISPLAY & DESCRIPTION
-    id.kv["DISPLAY"] = p.id;
-    char desc[512];
-    snprintf(desc, sizeof(desc), "%s-user %s %s %s release-keys",
-             p.product, p.release, p.id, p.incremental);
-    id.kv["DESCRIPTION"] = desc;
+        // Fill missing essentials if JSON didn't provide them
+        if (id.kv.find("DEVICE_INITIAL_SDK_INT") == id.kv.end() && id.kv.find("SDK_INT") != id.kv.end())
+            id.kv["DEVICE_INITIAL_SDK_INT"] = id.kv["SDK_INT"];
+        if (id.kv.find("DISPLAY") == id.kv.end()) id.kv["DISPLAY"] = id.kv["ID"];
+        if (id.kv.find("DESCRIPTION") == id.kv.end()) {
+            char desc[512];
+            snprintf(desc, sizeof(desc), "%s-user %s %s %s release-keys",
+                     id.kv["PRODUCT"].c_str(), id.kv["RELEASE"].c_str(),
+                     id.kv["ID"].c_str(), id.kv["INCREMENTAL"].c_str());
+            id.kv["DESCRIPTION"] = desc;
+        }
+    } else {
+        // 2. Fallback to embedded Pixel pool
+        std::uniform_int_distribution<size_t> pick(0, PIXEL_POOL.size() - 1);
+        const PixelEntry& p = PIXEL_POOL[pick(gen)];
 
-    // RADIO/BASEBAND (Pixel canonical format)
-    std::time_t now = std::time(nullptr);
-    struct tm lt;
-    localtime_r(&now, &lt);
-    char datebuf[16];
-    strftime(datebuf, sizeof(datebuf), "%y%m%d", &lt);
-    char rad[128];
-    snprintf(rad, sizeof(rad), "g5300q-%s-%s-B-%s", datebuf, datebuf, p.incremental);
-    id.kv["RADIO"] = rad;
+        id.kv["BRAND"]                  = "google";
+        id.kv["MANUFACTURER"]           = "Google";
+        id.kv["MODEL"]                  = p.model;
+        id.kv["DEVICE"]                 = p.device;
+        id.kv["PRODUCT"]                = p.product;
+        id.kv["BOARD"]                  = p.board;
+        id.kv["HARDWARE"]               = p.hardware;
+        id.kv["ID"]                     = p.id;
+        id.kv["INCREMENTAL"]            = p.incremental;
+        id.kv["RELEASE"]                = p.release;
+        id.kv["SDK_INT"]                = std::to_string(p.sdk);
+        id.kv["DEVICE_INITIAL_SDK_INT"] = std::to_string(p.sdk);
+        id.kv["SECURITY_PATCH"]         = p.security_patch;
 
-    // SERIAL & ANDROID_ID — keep_id load dari persistent_id.bin
+        std::string channel = std::string(p.product).find("_beta") != std::string::npos ? "CANARY" : "REL";
+        char fp[512];
+        snprintf(fp, sizeof(fp), "google/%s/%s:%s/%s/%s:user/release-keys",
+                 p.product, p.device, channel.c_str(), p.id, p.incremental);
+        id.kv["FINGERPRINT"] = fp;
+
+        id.kv["DISPLAY"] = p.id;
+        char desc[512];
+        snprintf(desc, sizeof(desc), "%s-user %s %s %s release-keys",
+                 p.product, p.release, p.id, p.incremental);
+        id.kv["DESCRIPTION"] = desc;
+
+        std::time_t now = std::time(nullptr);
+        struct tm lt;
+        localtime_r(&now, &lt);
+        char datebuf[16];
+        strftime(datebuf, sizeof(datebuf), "%y%m%d", &lt);
+        char rad[128];
+        snprintf(rad, sizeof(rad), "g5300q-%s-%s-B-%s", datebuf, datebuf, p.incremental);
+        id.kv["RADIO"] = rad;
+    }
+
+    // SERIAL & ANDROID_ID (Persistent logic remains the same)
     if (keep_id) {
         std::istringstream iss(read_file(PERSISTENT_BIN));
         std::string line;

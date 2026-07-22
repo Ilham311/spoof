@@ -58,8 +58,8 @@ jobs:
           cp build/x86_64/ternakctl      pkg/bin/ternakctl-x86_64
           cp build/x86/ternakctl         pkg/bin/ternakctl-x86
 
-          # Shell + install config
-          cp module.prop action.sh service.sh customize.sh pkg/
+          # Shell + install config + JSON pool
+          cp module.prop action.sh service.sh customize.sh pool.json pkg/
 
           # resetprop-rs prebuilt (drop manual dari release upstream ke prebuilt/)
           if [ -f prebuilt/resetprop-rs ]; then
