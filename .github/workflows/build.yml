@@ -1,4 +1,5 @@
-name: build
+name: Build Ternak v5.0
+
 on:
   push:
     branches: [main]
@@ -9,49 +10,76 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Setup Android NDK
-        id: setup-ndk
         uses: nttld/setup-ndk@v1
+        id: setup-ndk
         with:
-          ndk-version: r27c
-          local-cache: false
+          ndk-version: r27b
+          add-to-path: false
 
-      - name: Install ninja
-        run: sudo apt-get update && sudo apt-get install -y ninja-build
+      - name: Fetch zygisk.hpp
+        run: |
+          curl -sSL https://raw.githubusercontent.com/topjohnwu/zygisk-module-sample/master/module/jni/zygisk.hpp \
+               -o jni/zygisk.hpp
 
-      - name: Build Zygisk (4 ABI)
+      - name: Build for all ABIs
         env:
-          NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
-        working-directory: sources
+          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
         run: |
-          chmod +x build.sh
-          ./build.sh
+          for abi in arm64-v8a armeabi-v7a x86_64 x86; do
+            echo "==> Building $abi"
+            cmake -B build/$abi \
+              -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake \
+              -DANDROID_ABI=$abi \
+              -DANDROID_PLATFORM=android-26 \
+              -DCMAKE_BUILD_TYPE=Release \
+              -S jni
+            cmake --build build/$abi --parallel
+          done
 
-      - name: Verify SO output
+      - name: Assemble module zip
         run: |
-          ls -lh module/zygisk/
-          file module/zygisk/*.so
+          mkdir -p pkg/zygisk pkg/bin
 
-      - name: Pack merged module zip
-        run: |
-          cd module
-          zip -r ../ternak_device_changer-${{ github.sha }}.zip .
-          cd ..
-          ls -lh ternak_device_changer-*.zip
+          # Zygisk .so per ABI (Zygisk framework expects <ABI>.so filename)
+          cp build/arm64-v8a/libternak.so   pkg/zygisk/arm64-v8a.so
+          cp build/armeabi-v7a/libternak.so pkg/zygisk/armeabi-v7a.so
+          cp build/x86_64/libternak.so      pkg/zygisk/x86_64.so
+          cp build/x86/libternak.so         pkg/zygisk/x86.so
+
+          # ternakctl per ABI (customize.sh symlinks the right one)
+          cp build/arm64-v8a/ternakctl   pkg/bin/ternakctl-arm64
+          cp build/armeabi-v7a/ternakctl pkg/bin/ternakctl-arm
+          cp build/x86_64/ternakctl      pkg/bin/ternakctl-x86_64
+          cp build/x86/ternakctl         pkg/bin/ternakctl-x86
+
+          # Shell + install config + JSON pool
+          cp module.prop action.sh service.sh customize.sh pool.json pkg/
+
+          # resetprop-rs prebuilt (drop manual dari release upstream ke prebuilt/)
+          if [ -f prebuilt/resetprop-rs ]; then
+            cp prebuilt/resetprop-rs pkg/bin/
+            chmod +x pkg/bin/resetprop-rs
+          else
+            echo "! WARNING: prebuilt/resetprop-rs missing — zip akan tanpa resetprop"
+          fi
+
+          cd pkg && zip -r ../ternak-v5.0.0-pure-zygisk.zip .
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ternak_device_changer
-          path: ternak_device_changer-*.zip
-          retention-days: 30
+          name: ternak-v5.0.0-pure-zygisk
+          path: ternak-v5.0.0-pure-zygisk.zip
 
-      - name: Publish release (only on tag)
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: ternak_device_changer-*.zip
+          files: ternak-v5.0.0-pure-zygisk.zip
           generate_release_notes: true
