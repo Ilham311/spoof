@@ -253,6 +253,24 @@ static Identity generate_identity(bool keep_id) {
                      id.kv["ID"].c_str(), id.kv["INCREMENTAL"].c_str());
             id.kv["DESCRIPTION"] = desc;
         }
+        if (id.kv.find("FINGERPRINT") == id.kv.end()) {
+            std::string channel = id.kv["PRODUCT"].find("_beta") != std::string::npos ? "CANARY" : "REL";
+            char fp[512];
+            snprintf(fp, sizeof(fp), "google/%s/%s:%s/%s/%s:user/release-keys",
+                     id.kv["PRODUCT"].c_str(), id.kv["DEVICE"].c_str(), channel.c_str(),
+                     id.kv["ID"].c_str(), id.kv["INCREMENTAL"].c_str());
+            id.kv["FINGERPRINT"] = fp;
+        }
+        if (id.kv.find("RADIO") == id.kv.end()) {
+            std::time_t now = std::time(nullptr);
+            struct tm lt;
+            localtime_r(&now, &lt);
+            char datebuf[16];
+            strftime(datebuf, sizeof(datebuf), "%y%m%d", &lt);
+            char rad[128];
+            snprintf(rad, sizeof(rad), "g5300q-%s-%s-B-%s", datebuf, datebuf, id.kv["INCREMENTAL"].c_str());
+            id.kv["RADIO"] = rad;
+        }
     } else {
         // 2. Fallback to embedded Pixel pool
         std::uniform_int_distribution<size_t> pick(0, PIXEL_POOL.size() - 1);
