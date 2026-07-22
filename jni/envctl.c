@@ -1,8 +1,3 @@
-// ============================================================
-// ternakctl.c — Ternak Device Changer v5.0 CLI trigger
-// Connects to abstract UDS @ternak.ctrl (companion), sends command,
-// prints reply.
-// ============================================================
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -10,9 +5,7 @@
 #include <errno.h>
 #include <sys/socket.h>
 #include <sys/un.h>
-
-#define UDS_NAME "ternak.ctrl"
-
+#define UDS_NAME "env.ctrl"
 enum {
     CLI_REGENERATE = 10,
     CLI_STATUS     = 11,
@@ -22,18 +15,15 @@ enum {
     CLI_ROLLBACK   = 15,
     CLI_KEEP_ID    = 16,
 };
-
 static int connect_companion(void) {
     int fd = socket(AF_UNIX, SOCK_STREAM, 0);
     if (fd < 0) { perror("socket"); return -1; }
-
     struct sockaddr_un addr;
     memset(&addr, 0, sizeof(addr));
     addr.sun_family = AF_UNIX;
-    addr.sun_path[0] = '\0';   // abstract namespace
+    addr.sun_path[0] = '\0';
     strncpy(addr.sun_path + 1, UDS_NAME, sizeof(addr.sun_path) - 2);
     socklen_t alen = sizeof(sa_family_t) + 1 + strlen(UDS_NAME);
-
     if (connect(fd, (struct sockaddr*)&addr, alen) < 0) {
         fprintf(stderr, "! Cannot connect to @%s: %s\n", UDS_NAME, strerror(errno));
         fprintf(stderr, "! Is Zygisk enabled and module loaded? Try reboot.\n");
@@ -42,7 +32,6 @@ static int connect_companion(void) {
     }
     return fd;
 }
-
 static int read_and_print_reply(int fd) {
     uint32_t rlen = 0;
     if (read(fd, &rlen, sizeof(rlen)) != sizeof(rlen)) {
@@ -63,7 +52,6 @@ static int read_and_print_reply(int fd) {
     free(buf);
     return 0;
 }
-
 static int send_simple(uint8_t cmd) {
     int fd = connect_companion();
     if (fd < 0) return 1;
@@ -72,7 +60,6 @@ static int send_simple(uint8_t cmd) {
     close(fd);
     return r;
 }
-
 static int send_with_arg(uint8_t cmd, const char* arg) {
     int fd = connect_companion();
     if (fd < 0) return 1;
@@ -84,7 +71,6 @@ static int send_with_arg(uint8_t cmd, const char* arg) {
     close(fd);
     return r;
 }
-
 static void usage(const char* prog) {
     fprintf(stderr,
         "Usage: %s <command> [args]\n\n"
@@ -98,11 +84,9 @@ static void usage(const char* prog) {
         "  rollback [name]          Restore from snapshot (default: identity.prop.bak)\n",
         prog);
 }
-
 int main(int argc, char** argv) {
     if (argc < 2) { usage(argv[0]); return 1; }
     const char* cmd = argv[1];
-
     if (!strcmp(cmd, "regenerate")) {
         if (argc >= 3 && !strcmp(argv[2], "--keep-id")) return send_simple(CLI_KEEP_ID);
         return send_simple(CLI_REGENERATE);
@@ -115,7 +99,6 @@ int main(int argc, char** argv) {
     }
     if (!strcmp(cmd, "snapshot")) return send_with_arg(CLI_SNAPSHOT, argc >= 3 ? argv[2] : "");
     if (!strcmp(cmd, "rollback")) return send_with_arg(CLI_ROLLBACK, argc >= 3 ? argv[2] : "");
-
     usage(argv[0]);
     return 1;
 }
