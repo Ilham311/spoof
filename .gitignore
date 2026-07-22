@@ -1,0 +1,12 @@
+build/
+*.o
+*.so
+!module/zygisk/.gitkeep
+.idea/
+.vscode/
+.DS_Store
+node_modules/
+/*.zip
+cmake-build-*/
+.cxx/
+local.properties

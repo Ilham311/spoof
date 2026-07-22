@@ -1,0 +1,56 @@
+name: build
+
+on:
+  push:
+    branches: [ "main" ]
+    tags: [ "v*" ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup NDK
+        uses: nttld/setup-ndk@v1
+        id: setup-ndk
+        with:
+          ndk-version: r27c
+          local-cache: true
+
+      - name: Install Ninja
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
+
+      - name: Build Zygisk module
+        run: |
+          cd sources
+          ./build.sh
+        env:
+          NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+
+      - name: Verify build outputs
+        run: |
+          ls -lh module/zygisk/*.so
+          file module/zygisk/*.so
+
+      - name: Pack module
+        run: |
+          cd module
+          zip -r ../ternak_device_changer-${{ github.sha }}.zip .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ternak_device_changer-${{ github.sha }}
+          path: ternak_device_changer-${{ github.sha }}.zip
+          retention-days: 30
+
+      - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ternak_device_changer-${{ github.sha }}.zip
+          generate_release_notes: true
