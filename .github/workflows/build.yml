@@ -17,7 +17,7 @@ jobs:
         uses: nttld/setup-ndk@v1
         with:
           ndk-version: r27c
-          local-cache: true
+          local-cache: false
 
       - name: Install ninja
         run: sudo apt-get update && sudo apt-get install -y ninja-build
