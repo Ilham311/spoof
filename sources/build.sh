@@ -13,9 +13,9 @@ if [ ! -d "$NDK_PATH" ]; then
     exit 1
 fi
 
-CLANGXX="$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/clang++"
-if [ ! -x "$CLANGXX" ]; then
-    echo "Error: clang++ not found at '$CLANGXX' (NDK installation looks incomplete)"
+CLANGXX=$(ls "$NDK_PATH"/toolchains/llvm/prebuilt/*/bin/clang++ 2>/dev/null | head -n1)
+if [ -z "$CLANGXX" ] || [ ! -x "$CLANGXX" ]; then
+    echo "Error: clang++ not found under '$NDK_PATH/toolchains/llvm/prebuilt' (NDK installation looks incomplete)"
     exit 1
 fi
 

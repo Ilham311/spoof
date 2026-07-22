@@ -6,7 +6,7 @@ on:
       - master
       - main
     paths:
-      - 'module.prop'
+      - 'module/module.prop'
   workflow_dispatch:
 
 jobs:
@@ -22,9 +22,9 @@ jobs:
       - name: Get Version info
         id: get_version
         run: |
-          VERSION=$(grep '^version=' module.prop | cut -d'=' -f2 | tr -d '\r')
+          VERSION=$(grep '^version=' module/module.prop | cut -d'=' -f2 | tr -d '\r')
           echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
-          VERSION_CODE=$(grep '^versionCode=' module.prop | cut -d'=' -f2 | tr -d '\r')
+          VERSION_CODE=$(grep '^versionCode=' module/module.prop | cut -d'=' -f2 | tr -d '\r')
           echo "VERSION_CODE=$VERSION_CODE" >> $GITHUB_OUTPUT
 
       - name: Update update.json
@@ -46,7 +46,8 @@ jobs:
       - name: Create Zip Archive
         run: |
           ZIP_NAME="ternak_device_changer_${{ steps.get_version.outputs.VERSION }}.zip"
-          zip -r "$ZIP_NAME" . -x "*.git*" -x "*.github*" -x "*.DS_Store"
+          cd module && zip -r "../$ZIP_NAME" . -x "*.DS_Store"
+          cd ..
           echo "ZIP_NAME=$ZIP_NAME" >> $GITHUB_ENV
 
       - name: Create Release
