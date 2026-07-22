@@ -23,7 +23,6 @@
 #include <ctime>
 #include <cstring>
 #include <cstdio>
-#include <cctype>
 
 #define LOG_TAG "TernakCompanion"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO,  LOG_TAG, __VA_ARGS__)
@@ -121,6 +120,21 @@ static std::string random_hex(int bytes, bool upper = true) {
     return s;
 }
 
+static std::string random_uuid() {
+    // format: xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx
+    std::string s = random_hex(16, false);
+    std::string out = s.substr(0, 8) + "-" + s.substr(8, 4) + "-4" + s.substr(12, 3) + "-";
+
+    // y is 8, 9, a, or b
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_int_distribution<int> dist(8, 11);
+    const char* y_chars = "89ab";
+    out += y_chars[dist(gen)];
+    out += s.substr(15, 3) + "-" + random_hex(6, false);
+    return out;
+}
+
 static bool atomic_write(const std::string& path, const std::string& data) {
     std::string tmp = path + ".tmp";
     int fd = ::open(tmp.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
@@ -170,7 +184,7 @@ struct Identity {
             "BOARD", "HARDWARE", "FINGERPRINT", "ID", "DISPLAY", "DESCRIPTION",
             "BOOTLOADER", "HOST", "USER", "TYPE", "TAGS",
             "TIME", "INCREMENTAL", "RELEASE", "SDK_INT", "DEVICE_INITIAL_SDK_INT",
-            "SECURITY_PATCH", "CODENAME", "SERIAL", "RADIO", "ANDROID_ID",
+            "SECURITY_PATCH", "CODENAME", "SERIAL", "RADIO", "ANDROID_ID", "GAID", "GSF_ID",
         };
         std::string out;
         for (const auto& k : order) {
@@ -254,24 +268,6 @@ static Identity generate_identity(bool keep_id) {
                      id.kv["ID"].c_str(), id.kv["INCREMENTAL"].c_str());
             id.kv["DESCRIPTION"] = desc;
         }
-        if (id.kv.find("FINGERPRINT") == id.kv.end()) {
-            std::string channel = id.kv["PRODUCT"].find("_beta") != std::string::npos ? "CANARY" : "REL";
-            char fp[512];
-            snprintf(fp, sizeof(fp), "google/%s/%s:%s/%s/%s:user/release-keys",
-                     id.kv["PRODUCT"].c_str(), id.kv["DEVICE"].c_str(), channel.c_str(),
-                     id.kv["ID"].c_str(), id.kv["INCREMENTAL"].c_str());
-            id.kv["FINGERPRINT"] = fp;
-        }
-        if (id.kv.find("RADIO") == id.kv.end()) {
-            std::time_t now = std::time(nullptr);
-            struct tm lt;
-            localtime_r(&now, &lt);
-            char datebuf[16];
-            strftime(datebuf, sizeof(datebuf), "%y%m%d", &lt);
-            char rad[128];
-            snprintf(rad, sizeof(rad), "g5300q-%s-%s-B-%s", datebuf, datebuf, id.kv["INCREMENTAL"].c_str());
-            id.kv["RADIO"] = rad;
-        }
     } else {
         // 2. Fallback to embedded Pixel pool
         std::uniform_int_distribution<size_t> pick(0, PIXEL_POOL.size() - 1);
@@ -313,7 +309,7 @@ static Identity generate_identity(bool keep_id) {
         id.kv["RADIO"] = rad;
     }
 
-    // SERIAL & ANDROID_ID (Persistent logic remains the same)
+    // Persistent Identifiers (SERIAL, ANDROID_ID, GAID, GSF_ID)
     if (keep_id) {
         std::istringstream iss(read_file(PERSISTENT_BIN));
         std::string line;
@@ -321,14 +317,19 @@ static Identity generate_identity(bool keep_id) {
             auto eq = line.find('=');
             if (eq == std::string::npos) continue;
             std::string k = line.substr(0, eq), v = line.substr(eq + 1);
-            if (k == "SERIAL" || k == "ANDROID_ID") id.kv[k] = trim(v);
+            if (k == "SERIAL" || k == "ANDROID_ID" || k == "GAID" || k == "GSF_ID") id.kv[k] = trim(v);
         }
     }
     if (id.kv.find("SERIAL")     == id.kv.end()) id.kv["SERIAL"]     = random_hex(8, true);
     if (id.kv.find("ANDROID_ID") == id.kv.end()) id.kv["ANDROID_ID"] = random_hex(8, false);
+    if (id.kv.find("GAID")       == id.kv.end()) id.kv["GAID"]       = random_uuid();
+    if (id.kv.find("GSF_ID")     == id.kv.end()) id.kv["GSF_ID"]     = random_hex(8, false); // 16 hex chars
 
     // Update persistent snapshot
-    std::string snap = "SERIAL=" + id.kv["SERIAL"] + "\nANDROID_ID=" + id.kv["ANDROID_ID"] + "\n";
+    std::string snap = "SERIAL=" + id.kv["SERIAL"] +
+                       "\nANDROID_ID=" + id.kv["ANDROID_ID"] +
+                       "\nGAID=" + id.kv["GAID"] +
+                       "\nGSF_ID=" + id.kv["GSF_ID"] + "\n";
     atomic_write(PERSISTENT_BIN, snap);
 
     return id;
@@ -342,7 +343,7 @@ static std::set<std::string> load_targets();
 // ============================================================
 // Apply native prop + settings + kill gms/vending
 // ============================================================
-static void apply_native(const Identity& id, bool clear_targets = true) {
+static void apply_native(const Identity& id) {
     auto get = [&](const std::string& k) -> std::string {
         auto it = id.kv.find(k);
         return it != id.kv.end() ? it->second : "";
@@ -383,14 +384,11 @@ static void apply_native(const Identity& id, bool clear_targets = true) {
                 {"settings", "put", "secure", "android_id", aid.c_str()});
     }
 
-    // am force-stop (and pm clear, only on identity regeneration) for all
-    // targets in hook_targets.txt
+    // am force-stop and pm clear for all targets in hook_targets.txt
     std::set<std::string> targets = load_targets();
     for (const std::string& pkg : targets) {
         run_bin("/system/bin/am", {"am", "force-stop", pkg.c_str()});
-        if (clear_targets) {
-            run_bin("/system/bin/pm", {"pm", "clear", pkg.c_str()});
-        }
+        run_bin("/system/bin/pm", {"pm", "clear", pkg.c_str()});
     }
 }
 
@@ -421,6 +419,8 @@ static std::string do_regenerate(bool keep_id) {
     out += "  FINGERPRINT : " + id.kv["FINGERPRINT"] + "\n";
     out += "  SERIAL      : " + id.kv["SERIAL"]     + "\n";
     out += "  ANDROID_ID  : " + id.kv["ANDROID_ID"]  + "\n";
+    out += "  GAID        : " + id.kv["GAID"]        + "\n";
+    out += "  GSF_ID      : " + id.kv["GSF_ID"]      + "\n";
     out += "  SEC PATCH   : " + id.kv["SECURITY_PATCH"] + "\n";
     return out;
 }
@@ -456,7 +456,7 @@ static std::set<std::string> load_targets() {
 static bool is_safe_name(const std::string& name) {
     if (name.empty()) return false;
     for (char c : name) {
-        if (!isalnum(static_cast<unsigned char>(c)) && c != '_' && c != '-') return false;
+        if (!isalnum(c) && c != '_' && c != '-') return false;
     }
     return true;
 }
@@ -476,7 +476,7 @@ static void handle_cli(int client) {
         case CLI_APPLY_BOOT: {
             Identity id = load_identity();
             if (id.kv.empty()) { reply = "ERROR: no identity.prop\n"; break; }
-            apply_native(id, /*clear_targets=*/false);
+            apply_native(id);
             reply = "OK: native prop re-applied at boot\n";
             break;
         }
@@ -493,9 +493,7 @@ static void handle_cli(int client) {
                 reply = "bad len\n"; break;
             }
             std::string m(len, 0);
-            if (::read(client, m.data(), len) != (ssize_t)len) {
-                reply = "bad mode\n"; break;
-            }
+            ::read(client, m.data(), len);
             atomic_write(MODE_FILE, m + "\n");
             reply = "OK: mode=" + m + "\n";
             break;
@@ -503,13 +501,9 @@ static void handle_cli(int client) {
 
         case CLI_SNAPSHOT: {
             uint32_t len = 0;
-            if (::read(client, &len, sizeof(len)) != sizeof(len) || len > 64) {
-                reply = "bad len\n"; break;
-            }
+            ::read(client, &len, sizeof(len));
             std::string name(len, 0);
-            if (len && ::read(client, name.data(), len) != (ssize_t)len) {
-                reply = "bad name\n"; break;
-            }
+            if (len) ::read(client, name.data(), len);
             if (name.empty()) name = "default";
             if (!is_safe_name(name)) { reply = "ERROR: invalid snapshot name\n"; break; }
             std::string dst = std::string(MODDIR) + "/identity.snap." + name;
@@ -521,13 +515,9 @@ static void handle_cli(int client) {
 
         case CLI_ROLLBACK: {
             uint32_t len = 0;
-            if (::read(client, &len, sizeof(len)) != sizeof(len) || len > 64) {
-                reply = "bad len\n"; break;
-            }
+            ::read(client, &len, sizeof(len));
             std::string name(len, 0);
-            if (len && ::read(client, name.data(), len) != (ssize_t)len) {
-                reply = "bad name\n"; break;
-            }
+            if (len) ::read(client, name.data(), len);
             std::string src = IDENTITY_BAK;
             if (!name.empty()) {
                 if (!is_safe_name(name)) { reply = "ERROR: invalid snapshot name\n"; break; }
@@ -536,7 +526,7 @@ static void handle_cli(int client) {
             std::string data = read_file(src);
             if (data.empty()) { reply = "no such snapshot\n"; break; }
             atomic_write(IDENTITY_FILE, data);
-            apply_native(load_identity(), /*clear_targets=*/false);
+            apply_native(load_identity());
             reply = "OK: rollback from " + src + "\n";
             break;
         }
