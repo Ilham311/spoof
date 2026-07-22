@@ -42,16 +42,24 @@ public:
         api_ = api;
         env_ = env;
         memset(process_name_, 0, sizeof(process_name_));
+        memset(spoof_props_, 0, sizeof(spoof_props_));
         spoof_props_count_ = 0;
     }
 
     void preAppSpecialize(zygisk::AppSpecializeArgs *args) override {
-        const char *process_name = args->nice_name;
+        jstring nice_name = args->nice_name;
+        if (!nice_name) {
+            api_->setOption(zygisk::DLCLOSE_MODULE_LIBRARY);
+            return;
+        }
+        const char *process_name = env_->GetStringUTFChars(nice_name, nullptr);
         if (!process_name) {
             api_->setOption(zygisk::DLCLOSE_MODULE_LIBRARY);
             return;
         }
         strncpy(process_name_, process_name, sizeof(process_name_) - 1);
+        process_name_[sizeof(process_name_) - 1] = '\0';
+        env_->ReleaseStringUTFChars(nice_name, process_name);
 
         if (!is_target_process()) {
             api_->setOption(zygisk::DLCLOSE_MODULE_LIBRARY);
@@ -161,7 +169,9 @@ private:
                 }
 
                 strncpy(spoof_props_[spoof_props_count_].key, key, MAX_PROP_LEN - 1);
+                spoof_props_[spoof_props_count_].key[MAX_PROP_LEN - 1] = '\0';
                 strncpy(spoof_props_[spoof_props_count_].value, val, MAX_PROP_LEN - 1);
+                spoof_props_[spoof_props_count_].value[MAX_PROP_LEN - 1] = '\0';
                 spoof_props_count_++;
             }
         }
