@@ -295,6 +295,7 @@ EOF
     log_info "Serial: $serial"
 
     # Tulis spoof.prop utk Zygisk companion — bentuk KEY=VALUE (compat pif.prop)
+    rm -f "$MODDIR/spoof.prop"
     cat > "$MODDIR/spoof.prop" <<EOF
 BRAND=$P_BRAND
 MANUFACTURER=$P_MANUFACTURER

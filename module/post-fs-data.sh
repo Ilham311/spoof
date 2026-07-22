@@ -73,8 +73,8 @@ com.cwsl.mydevice
 ZEOF
     chmod 644 "$TERNAK/hook_targets.txt"
 fi
-if [ ! -f "$TERNAK/spoof.prop" ] && [ -f /data/adb/modules/playintegrityfix/pif.prop ]; then
-    ln -sf /data/adb/modules/playintegrityfix/pif.prop "$TERNAK/spoof.prop" 2>/dev/null
+if [ ! -e "$TERNAK/spoof.prop" ] && [ -f /data/adb/modules/playintegrityfix/pif.prop ]; then
+    cat /data/adb/modules/playintegrityfix/pif.prop > "$TERNAK/spoof.prop" 2>/dev/null
 fi
 # --------------------------------------------
 
