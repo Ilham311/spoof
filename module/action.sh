@@ -1,52 +1,218 @@
-#!/system/bin/sh
+#!/bin/sh
+# ============================================================
+# action.sh — Ternak Device Changer
+# All-in-one: fetch Pixel Canary dari Google OTA → spoof.prop.
+# Adapted from: PlayIntegrityFix / action/pixel_canary.sh
+#
+# Cukup tap Action di KSU/APatch/Magisk manager — tanpa input.
+# ============================================================
+
+PATH=/data/adb/ap/bin:/data/adb/ksu/bin:/data/adb/magisk:/data/data/com.termux/files/usr/bin:$PATH
+MODDIR="${0%/*}"
+[ -z "$MODDIR" ] || [ "$MODDIR" = "." ] && MODDIR=/data/adb/modules/ternak_device_changer
+SPOOF="$MODDIR/spoof.prop"
+BACKUP="$MODDIR/spoof.prop.bak"
+VERSION="1.2-ota-merged"
+
+# ---------- inline helpers (menggantikan common_func.sh PIF) ----------
+download() {
+    url="$1"; output="$2"
+    if command -v curl >/dev/null 2>&1; then
+        curl --connect-timeout 10 -sfL -A 'Mozilla/5.0' "$url" -o "$output" || download_fail "$url"
+    else
+        busybox wget -T 10 --header 'User-Agent: Mozilla/5.0' -qO "$output" "$url" || download_fail "$url"
+    fi
+}
+download_fail() {
+    echo "! Failed to download: $1"
+    rm -rf "$TEMPDIR"
+    exit 1
+}
+
+# ---------- tmpfs preference ----------
+TEMPDIR="$MODDIR/temp"
+[ -w /sbin ]           && TEMPDIR="/sbin/ternak_fetch"
+[ -w /debug_ramdisk ]  && TEMPDIR="/debug_ramdisk/ternak_fetch"
+[ -w /dev ]            && TEMPDIR="/dev/ternak_fetch"
+mkdir -p "$TEMPDIR"
+cd "$TEMPDIR" || exit 1
+
+echo "[+] Ternak Device Changer — Fetch Pixel Canary $VERSION"
+echo "[+] $(date '+%Y-%m-%d %H:%M:%S')"
+printf '\n'
+
+set_random_beta() {
+    if [ "$(echo "$MODEL_LIST" | wc -l)" -ne "$(echo "$PRODUCT_LIST" | wc -l)" ]; then
+        echo "! MODEL/PRODUCT list mismatch — fallback ke Pixel 6"
+        MODEL="Pixel 6"
+        PRODUCT="oriole_beta"
+    else
+        count=$(echo "$MODEL_LIST" | wc -l)
+        rand_index=$(( $$ % count ))
+        MODEL=$(echo "$MODEL_LIST"   | sed -n "$((rand_index + 1))p")
+        PRODUCT=$(echo "$PRODUCT_LIST" | sed -n "$((rand_index + 1))p")
+    fi
+}
 
 # ============================================================
-# Ternak Device Changer - Action Script
-# Mendeteksi WebUI manager yang terinstall dan membukanya.
-# Jika tidak ada, jalankan Full Proses via terminal.
+# 1. Cari halaman Android Canary terbaru
 # ============================================================
+echo "- Fetching Android versions index ..."
+download https://developer.android.com/about/versions PIXEL_VERSIONS_HTML
+LATEST_URL=$(grep -o 'https://developer.android.com/about/versions/.*[0-9]"' PIXEL_VERSIONS_HTML \
+             | sort -ru | cut -d\" -f1 | head -n1)
+download "$LATEST_URL" PIXEL_LATEST_HTML
 
-MODDIR=${0%/*}
-MODULE_ID="ternak_device_changer"
+FI_URL="https://developer.android.com$(grep -o 'href=".*download.*"' PIXEL_LATEST_HTML \
+         | grep 'qpr' | cut -d\" -f2 | head -n1)"
+download "$FI_URL" PIXEL_FI_HTML
 
-# --- Coba buka WebUI lewat manager yang tersedia ---
+OTA_URL="https://developer.android.com$(grep -o 'href=".*download-ota.*"' PIXEL_LATEST_HTML \
+          | grep 'qpr' | cut -d\" -f2 | head -n1)"
+download "$OTA_URL" PIXEL_OTA_HTML
 
-# 1. KSUWebUIStandalone
-if pm list packages 2>/dev/null | grep -q "io.github.a13e300.ksuwebui"; then
-    echo "- Membuka WebUI di KSUWebUIStandalone..."
-    am start -n "io.github.a13e300.ksuwebui/.WebUIActivity" -e id "$MODULE_ID" >/dev/null 2>&1
-    exit 0
+SRC=FI
+FI_COUNT=$(grep 'tr id=' PIXEL_FI_HTML  | sed 's;.*<tr id="\(.*\)">.*;\1;' | wc -w)
+OTA_COUNT=$(grep 'tr id=' PIXEL_OTA_HTML | sed 's;.*<tr id="\(.*\)">.*;\1;' | wc -w)
+[ "$FI_COUNT" -lt "$OTA_COUNT" ] && SRC=OTA
+
+MODEL_LIST="$(grep -A1 'tr id=' PIXEL_${SRC}_HTML | grep 'td' | sed 's;.*<td>\(.*\)</td>.*;\1;')"
+PRODUCT_LIST="$(grep 'tr id=' PIXEL_${SRC}_HTML | sed 's;.*<tr id="\(.*\)">.*;\1_beta;')"
+
+# ============================================================
+# 2. Random pick device Pixel Canary
+# ============================================================
+echo "- Selecting random Pixel Canary device ..."
+set_random_beta
+echo "  → $MODEL ($PRODUCT)"
+
+# ============================================================
+# 3. Ambil ID + INCREMENTAL dari Flash Station API
+# ============================================================
+DEVICE="$(echo "$PRODUCT" | sed 's/_beta//')"
+echo "- Fetching Flash Station API key ..."
+download https://flash.android.com PIXEL_FLASH_HTML
+FLASH_KEY=$(grep -o '<body data-client-config=.*' PIXEL_FLASH_HTML | cut -d\; -f2 | cut -d\& -f1)
+
+echo "- Querying build info untuk $PRODUCT ..."
+if command -v curl >/dev/null 2>&1; then
+    curl --connect-timeout 10 -H "Referer: https://flash.android.com" -s \
+        "https://content-flashstation-pa.googleapis.com/v1/builds?product=$PRODUCT&key=$FLASH_KEY" \
+        > PIXEL_STATION_JSON || download_fail "flash.android.com"
+else
+    busybox wget -T 10 --header "Referer: https://flash.android.com" -qO - \
+        "https://content-flashstation-pa.googleapis.com/v1/builds?product=$PRODUCT&key=$FLASH_KEY" \
+        > PIXEL_STATION_JSON || download_fail "flash.android.com"
 fi
 
-# 2. MMRL (Magisk Module Repo Loader)
-if pm list packages 2>/dev/null | grep -q "com.dergoogler.mmrl"; then
-    echo "- Membuka WebUI di MMRL..."
-    am start -n "com.dergoogler.mmrl/.ui.activity.webui.WebUIActivity" -e MOD_ID "$MODULE_ID" >/dev/null 2>&1
-    exit 0
+busybox tac PIXEL_STATION_JSON | busybox grep -m1 -A13 '"canary": true' > PIXEL_CANARY_JSON
+
+ID="$(grep 'releaseCandidateName' PIXEL_CANARY_JSON | cut -d\" -f4)"
+INCREMENTAL="$(grep 'buildId' PIXEL_CANARY_JSON | cut -d\" -f4)"
+FINGERPRINT="google/$PRODUCT/$DEVICE:CANARY/$ID/$INCREMENTAL:user/release-keys"
+
+# ============================================================
+# 4. SECURITY_PATCH dari Android Security Bulletin
+# ============================================================
+echo "- Fetching security bulletin ..."
+download https://source.android.com/docs/security/bulletin/pixel PIXEL_SECBULL_HTML
+CANARY_ID="$(grep '"id"' PIXEL_CANARY_JSON | sed -e 's;.*canary-\(.*\)".*;\1;' -e 's;^\(.\{4\}\);\1-;')"
+SECURITY_PATCH="$(grep "<td>$CANARY_ID" PIXEL_SECBULL_HTML | sed 's;.*<td>\(.*\)</td>;\1;')"
+
+if [ -z "$ID" ] || [ -z "$INCREMENTAL" ]; then
+    echo "! Failed to fetch Canary build info dari Google (ID/INCREMENTAL kosong)"
+    rm -rf "$TEMPDIR"
+    exit 1
+fi
+if [ -z "$SECURITY_PATCH" ]; then
+    echo "- Bulletin belum publish. Assuming security patch from Canary ID"
+    SECURITY_PATCH="${CANARY_ID}-05"
 fi
 
-# 3. WebUI-X Portable
-if pm list packages 2>/dev/null | grep -q "com.wxportal"; then
-    echo "- Membuka WebUI di WebUI-X..."
-    am start -n "com.wxportal/.WebUIActivity" -e id "$MODULE_ID" >/dev/null 2>&1
-    exit 0
+# ============================================================
+# 5. Compose 21 field spoof.prop
+# ============================================================
+BRAND=google
+MANUFACTURER=Google
+BOARD="$DEVICE"
+HARDWARE="$DEVICE"
+TYPE=user
+TAGS=release-keys
+BOOTLOADER=unknown
+HOST=abfarm-release
+BUSER=android-build
+CODENAME=REL
+
+API_VER=$(echo "$LATEST_URL" | grep -oE '[0-9]+' | tail -n1)
+case "$API_VER" in
+    17) SDK=37 ;;
+    16) SDK=36 ;;
+    15) SDK=35 ;;
+    14) SDK=34 ;;
+    13) SDK=33 ;;
+    12) SDK=32 ;;
+    *)  SDK=35 ;;
+esac
+INITSDK="$SDK"
+RELEASE="$API_VER"
+TIME_MS="$(date +%s)000"
+
+# ============================================================
+# 6. Backup + tulis spoof.prop
+# ============================================================
+if [ -f "$SPOOF" ]; then
+    cp "$SPOOF" "$BACKUP"
+    echo "- Backup lama → $BACKUP"
 fi
 
-# --- Tidak ada WebUI manager: jalankan Full Proses via terminal ---
+echo "- Writing spoof.prop ..."
 echo ""
-echo "⚠️  Tidak ada WebUI Manager terdeteksi!"
-echo "   Install salah satu aplikasi berikut untuk"
-echo "   mendapatkan tampilan antarmuka grafis (WebUI):"
+cat <<EOF | tee "$SPOOF"
+BRAND=$BRAND
+MANUFACTURER=$MANUFACTURER
+MODEL=$MODEL
+DEVICE=$DEVICE
+PRODUCT=$PRODUCT
+BOARD=$BOARD
+HARDWARE=$HARDWARE
+FINGERPRINT=$FINGERPRINT
+ID=$ID
+BOOTLOADER=$BOOTLOADER
+HOST=$HOST
+USER=$BUSER
+TYPE=$TYPE
+TAGS=$TAGS
+TIME=$TIME_MS
+INCREMENTAL=$INCREMENTAL
+RELEASE=$RELEASE
+SDK_INT=$SDK
+DEVICE_INITIAL_SDK_INT=$INITSDK
+SECURITY_PATCH=$SECURITY_PATCH
+CODENAME=$CODENAME
+EOF
+chmod 644 "$SPOOF"
 echo ""
-echo "   • KSUWebUIStandalone"
-echo "   • MMRL (Magisk Module Repo Loader)"
-echo "   • WebUI-X Portable"
-echo ""
-echo "   Sementara itu, menjalankan Quick Action..."
-echo "================================================"
-echo ""
+echo "- spoof.prop saved to $SPOOF"
 
-sh "$MODDIR/ternak_core_v4.sh" full
+# ============================================================
+# 7. Cleanup + live reseal + kill gms/vending
+# ============================================================
+echo "- Cleaning up ..."
+rm -rf "$TEMPDIR"
+
+if [ -x "$MODDIR/ternak_core_v4.sh" ]; then
+    echo "- Running reseal via ternak_core_v4 ..."
+    sh "$MODDIR/ternak_core_v4.sh" reseal 2>/dev/null
+fi
+
+for i in $(busybox pidof com.google.android.gms.unstable com.android.vending 2>/dev/null); do
+    echo "- Killing pid $i"
+    kill -9 "$i" 2>/dev/null
+done
 
 echo ""
-echo "[✓] Selesai!"
+echo "[✓] Done!"
+echo "    MODEL       : $MODEL"
+echo "    FINGERPRINT : $FINGERPRINT"
+echo "    SEC PATCH   : $SECURITY_PATCH"
+sleep 3
