@@ -1,7 +1,7 @@
 id=ternak_device_changer
 name=Ternak Device ZYGISK 
-version=v2-FIX 
-versionCode=2
+version=v1-FIX 
+versionCode=1
 author=Ilham 
 description=Pure-Zygisk device identity spoofer. Fresh identity from embedded Pixel pool. Covers 25 Build.* fields + native ro.serialno / display.id / baseband. No shell core.
 updateJson=https://raw.githubusercontent.com/diru768/ternak-device-changer/main/update.json
