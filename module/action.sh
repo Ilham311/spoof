@@ -12,7 +12,7 @@ MODDIR="${0%/*}"
 [ -z "$MODDIR" ] || [ "$MODDIR" = "." ] && MODDIR=/data/adb/modules/ternak_device_changer
 SPOOF="$MODDIR/spoof.prop"
 BACKUP="$MODDIR/spoof.prop.bak"
-VERSION="1.2-ota-merged"
+VERSION="1.3-ota-fixed"    # v1.3: fix DevInfo "Nama perangkat", "Membangun nomor", "Pita dasar"
 
 # ---------- inline helpers (menggantikan common_func.sh PIF) ----------
 download() {
@@ -157,8 +157,13 @@ INITSDK="$SDK"
 RELEASE="$API_VER"
 TIME_MS="$(date +%s)000"
 
+# v1.3: tambahan field untuk fix DevInfo "Membangun nomor" & "Pita dasar"
+DISPLAY="$ID"
+DESCRIPTION="$PRODUCT-$TYPE $RELEASE $ID $INCREMENTAL $TAGS"
+BASEBAND="g5300q-$(date +%y%m%d)-$(date +%y%m%d)-B-$INCREMENTAL"
+
 # ============================================================
-# 6. Backup + tulis spoof.prop
+# 6. Backup + tulis spoof.prop (23 field: +DISPLAY +DESCRIPTION)
 # ============================================================
 if [ -f "$SPOOF" ]; then
     cp "$SPOOF" "$BACKUP"
@@ -177,6 +182,8 @@ BOARD=$BOARD
 HARDWARE=$HARDWARE
 FINGERPRINT=$FINGERPRINT
 ID=$ID
+DISPLAY=$DISPLAY
+DESCRIPTION=$DESCRIPTION
 BOOTLOADER=$BOOTLOADER
 HOST=$HOST
 USER=$BUSER
@@ -195,7 +202,30 @@ echo ""
 echo "- spoof.prop saved to $SPOOF"
 
 # ============================================================
-# 7. Cleanup + live reseal + kill gms/vending
+# 7. Native prop overrides via resetprop-rs
+#    Fix: "Membangun nomor" (ro.build.display.id + description)
+#    Fix: "Pita dasar"     (gsm.version.baseband + ro.build.expect.baseband)
+# ============================================================
+RP="$MODDIR/bin/resetprop-rs"
+if [ -x "$RP" ]; then
+    echo "- Native resetprop: display.id / description / baseband ..."
+    "$RP" -n ro.build.display.id      "$DISPLAY"     2>/dev/null
+    "$RP" -n ro.build.description     "$DESCRIPTION" 2>/dev/null
+    "$RP" -n gsm.version.baseband     "$BASEBAND"    2>/dev/null
+    "$RP" -n ro.build.expect.baseband "$BASEBAND"    2>/dev/null
+else
+    echo "! resetprop-rs tidak ada — skip native override"
+fi
+
+# ============================================================
+# 8. Update device_name (fix DevInfo "Nama perangkat" = POCO F3)
+# ============================================================
+echo "- Setting device_name = $MODEL ..."
+settings put global device_name "$MODEL" 2>/dev/null
+settings put system device_name "$MODEL" 2>/dev/null
+
+# ============================================================
+# 9. Cleanup + live reseal + kill gms/vending
 # ============================================================
 echo "- Cleaning up ..."
 rm -rf "$TEMPDIR"
@@ -213,6 +243,8 @@ done
 echo ""
 echo "[✓] Done!"
 echo "    MODEL       : $MODEL"
+echo "    DISPLAY     : $DISPLAY"
 echo "    FINGERPRINT : $FINGERPRINT"
+echo "    BASEBAND    : $BASEBAND"
 echo "    SEC PATCH   : $SECURITY_PATCH"
 sleep 3
