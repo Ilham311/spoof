@@ -5,7 +5,7 @@ set -euo pipefail
 
 NDK="${NDK_HOME:-${ANDROID_NDK_HOME:-}}"
 [ -z "$NDK" ] && { echo "Set NDK_HOME atau ANDROID_NDK_HOME"; exit 1; }
-[ -x "$NDK/build/cmake/android.toolchain.cmake" ] || { echo "NDK invalid: $NDK"; exit 1; }
+[ -f "$NDK/build/cmake/android.toolchain.cmake" ] || { echo "NDK invalid: $NDK"; exit 1; }
 
 API=26                                   # min Android 8 (Zygisk sendiri butuh 26+)
 ABIS=(arm64-v8a armeabi-v7a x86_64 x86)
