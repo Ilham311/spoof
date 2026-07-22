@@ -367,7 +367,7 @@ static std::set<std::string> load_targets() {
 static bool is_safe_name(const std::string& name) {
     if (name.empty()) return false;
     for (char c : name) {
-        if (!isalnum((unsigned char)c) && c != '_' && c != '-') return false;
+        if (!isalnum(c) && c != '_' && c != '-') return false;
     }
     return true;
 }
@@ -412,13 +412,9 @@ static void handle_cli(int client) {
 
         case CLI_SNAPSHOT: {
             uint32_t len = 0;
-            if (::read(client, &len, sizeof(len)) != sizeof(len) || len > 256) {
-                reply = "bad len\n"; break;
-            }
+            ::read(client, &len, sizeof(len));
             std::string name(len, 0);
-            if (len && ::read(client, name.data(), len) != (ssize_t)len) {
-                reply = "short read\n"; break;
-            }
+            if (len) ::read(client, name.data(), len);
             if (name.empty()) name = "default";
             if (!is_safe_name(name)) { reply = "ERROR: invalid snapshot name\n"; break; }
             std::string dst = std::string(MODDIR) + "/identity.snap." + name;
@@ -430,13 +426,9 @@ static void handle_cli(int client) {
 
         case CLI_ROLLBACK: {
             uint32_t len = 0;
-            if (::read(client, &len, sizeof(len)) != sizeof(len) || len > 256) {
-                reply = "bad len\n"; break;
-            }
+            ::read(client, &len, sizeof(len));
             std::string name(len, 0);
-            if (len && ::read(client, name.data(), len) != (ssize_t)len) {
-                reply = "short read\n"; break;
-            }
+            if (len) ::read(client, name.data(), len);
             std::string src = IDENTITY_BAK;
             if (!name.empty()) {
                 if (!is_safe_name(name)) { reply = "ERROR: invalid snapshot name\n"; break; }
@@ -529,7 +521,7 @@ extern "C" __attribute__((visibility("default"))) void ternak_companion_entry(in
             std::string pkg(len, 0);
             if (::read(client, pkg.data(), len) != (ssize_t)len) break;
 
-            std::set<std::string> targets = load_targets();
+            static std::set<std::string> targets = load_targets();
             uint8_t r = targets.count(pkg) ? 1 : 0;
             ::write(client, &r, 1);
         } else if (cmd == CMD_GET_IDENTITY) {

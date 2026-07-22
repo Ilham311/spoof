@@ -173,8 +173,10 @@ static void apply_build_hooks(JNIEnv* env) {
         const std::string& t = lookup("TIME");
         if (!t.empty()) {
             char* end = nullptr;
-            long long v = strtoll(t.c_str(), &end, 10);
-            if (end != t.c_str()) set_long(env, build, "TIME", (jlong)v);
+            long long val = std::strtoll(t.c_str(), &end, 10);
+            if (end && *end == '\0') {
+                set_long(env, build, "TIME", (jlong)val);
+            }
         }
         env->DeleteLocalRef(build);
     } else env->ExceptionClear();
@@ -193,15 +195,19 @@ static void apply_build_hooks(JNIEnv* env) {
         const std::string& s = lookup("SDK_INT");
         if (!s.empty()) {
             char* end = nullptr;
-            long v = strtol(s.c_str(), &end, 10);
-            if (end != s.c_str()) set_int(env, ver, "SDK_INT", (jint)v);
+            long val = std::strtol(s.c_str(), &end, 10);
+            if (end && *end == '\0') {
+                set_int(env, ver, "SDK_INT", (int)val);
+            }
         }
 
         const std::string& si = lookup("DEVICE_INITIAL_SDK_INT");
         if (!si.empty()) {
             char* end = nullptr;
-            long v = strtol(si.c_str(), &end, 10);
-            if (end != si.c_str()) set_int(env, ver, "DEVICE_INITIAL_SDK_INT", (jint)v);
+            long val = std::strtol(si.c_str(), &end, 10);
+            if (end && *end == '\0') {
+                set_int(env, ver, "DEVICE_INITIAL_SDK_INT", (int)val);
+            }
         }
 
         env->DeleteLocalRef(ver);

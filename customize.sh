@@ -43,11 +43,9 @@ else
 fi
 
 # Zygisk .so files (permission handled by Zygisk framework, but chmod anyway)
-if [ -d "$MODPATH/zygisk" ]; then
-    for abi_dir in "$MODPATH"/zygisk/*.so; do
-        [ -f "$abi_dir" ] && set_perm "$abi_dir" 0 0 0644
-    done
-fi
+for abi_dir in $MODPATH/zygisk/*.so; do
+    set_perm "$abi_dir" 0 0 0644
+done
 
 # Symlink ternakctl → ABI-specific binary
 case "$ABI" in
