@@ -13,6 +13,12 @@ if [ ! -d "$NDK_PATH" ]; then
     exit 1
 fi
 
+CLANGXX="$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/clang++"
+if [ ! -x "$CLANGXX" ]; then
+    echo "Error: clang++ not found at '$CLANGXX' (NDK installation looks incomplete)"
+    exit 1
+fi
+
 API=26
 ABIS=("arm64-v8a" "armeabi-v7a" "x86_64" "x86")
 
