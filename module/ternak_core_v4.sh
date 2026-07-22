@@ -293,6 +293,27 @@ EOF
     log_ok "Profile applied: $PROFILE_NAME"
     log_info "Fingerprint: $P_FINGERPRINT"
     log_info "Serial: $serial"
+
+    # Tulis spoof.prop utk Zygisk companion — bentuk KEY=VALUE (compat pif.prop)
+    cat > "$MODDIR/spoof.prop" <<EOF
+BRAND=$P_BRAND
+MANUFACTURER=$P_MANUFACTURER
+MODEL=$P_MODEL
+DEVICE=$P_DEVICE
+PRODUCT=$P_PRODUCT
+BOARD=$P_BOARD
+HARDWARE=$P_HARDWARE
+FINGERPRINT=$P_FINGERPRINT
+ID=$P_BUILD_ID
+INCREMENTAL=$P_INCREMENTAL
+RELEASE=$P_RELEASE
+SDK_INT=$P_SDK
+SECURITY_PATCH=$P_SECURITY_PATCH
+TAGS=$P_TAGS
+TYPE=$P_TYPE
+EOF
+    chmod 644 "$MODDIR/spoof.prop"
+    log_ok "spoof.prop written for Zygisk companion"
 }
 
 # === Identifier setters ===

@@ -58,4 +58,24 @@ fi
 # --- Compact arena (buang gap forensik) ---
 "$RP" --compact 2>/dev/null
 log "post-fs-data selesai"
+
+# ---- Zygisk bootstrap (merged edition) ----
+TERNAK="$MODDIR"
+if [ ! -f "$TERNAK/hook_targets.txt" ]; then
+    cat > "$TERNAK/hook_targets.txt" <<'ZEOF'
+# 1 baris = 1 package. Suffix "*" = prefix match.
+com.shopee.id
+com.tokopedia.tkpd
+com.ss.android.ugc.trill
+com.zhiliaoapp.musically
+com.liuzh.deviceinfo
+com.cwsl.mydevice
+ZEOF
+    chmod 644 "$TERNAK/hook_targets.txt"
+fi
+if [ ! -f "$TERNAK/spoof.prop" ] && [ -f /data/adb/modules/playintegrityfix/pif.prop ]; then
+    ln -sf /data/adb/modules/playintegrityfix/pif.prop "$TERNAK/spoof.prop" 2>/dev/null
+fi
+# --------------------------------------------
+
 exit 0
