@@ -1,5 +1,6 @@
-// main.cpp — Ternak Zygisk Companion
-// Hook android.os.Build.* untuk paket yang ada di /data/adb/modules/ternak_device_changer/hook_targets.txt
+// main.cpp — Ternak Zygisk Companion (v1.1.0)
+// Hook android.os.Build.* untuk paket di hook_targets.txt
+// v1.1.0: derive_from_fingerprint() safety net + skip-log verbose
 
 #include <jni.h>
 #include <cstring>
@@ -27,7 +28,6 @@ static constexpr const char *TARGETS_FILE = "/data/adb/modules/ternak_device_cha
 static constexpr const char *SPOOF_FILE   = "/data/adb/modules/ternak_device_changer/spoof.prop";
 static constexpr const char *PIF_FILE     = "/data/adb/modules/playintegrityfix/pif.prop";
 
-// ------- util: trim + parse KEY=VALUE -------
 static inline void trim(std::string &s) {
     while (!s.empty() && (s.back()==' '||s.back()=='\t'||s.back()=='\r'||s.back()=='\n')) s.pop_back();
     size_t p = 0; while (p < s.size() && (s[p]==' '||s[p]=='\t')) ++p;
@@ -43,7 +43,6 @@ public:
     }
 
     void preAppSpecialize(AppSpecializeArgs *args) override {
-        // Ambil nama proses (biasanya = package name)
         if (!args || !args->nice_name) { unload(); return; }
         const char *raw = env->GetStringUTFChars(args->nice_name, nullptr);
         if (!raw) { unload(); return; }
@@ -51,7 +50,6 @@ public:
         env->ReleaseStringUTFChars(args->nice_name, raw);
 
         if (!is_target(proc_name)) {
-            // Bukan target → unload, hemat RSS di ratusan proses lain
             unload();
             return;
         }
@@ -70,7 +68,6 @@ public:
     }
 
     void preServerSpecialize(ServerSpecializeArgs * /*args*/) override {
-        // System-server tidak di-hook — auto unload
         unload();
     }
 
@@ -96,7 +93,6 @@ private:
                 if (line.empty()) continue;
                 any = true;
                 if (line == pkg) return true;
-                // dukungan wildcard prefix, mis. "com.ss.android.ugc.*"
                 if (!line.empty() && line.back() == '*') {
                     std::string prefix = line.substr(0, line.size() - 1);
                     if (pkg.compare(0, prefix.size(), prefix) == 0) return true;
@@ -105,7 +101,6 @@ private:
         }
         if (any) return false;
 
-        // Fallback: default target (kalau file blm dibuat)
         static const char *defaults[] = {
             "com.shopee.id",
             "com.tokopedia.tkpd",
@@ -120,7 +115,7 @@ private:
         return false;
     }
 
-    // -------- spoof.prop / pif.prop loader --------
+    // -------- prop parser --------
     bool parse_prop_file(const char *path) {
         std::ifstream f(path);
         if (!f) return false;
@@ -134,19 +129,61 @@ private:
             std::string v = line.substr(eq + 1);
             trim(k); trim(v);
             if (k.empty()) continue;
-            // Skip PIF-specific control keys yang bukan Build.*
             if (k == "DEBUG" || k.rfind("spoof", 0) == 0 || k == "verboseLogs") continue;
             spoof[k] = v;
         }
         return spoof.size() > before;
     }
 
+    // -------- v1.1.0: derive missing keys dari FINGERPRINT --------
+    // format kanonik: brand/product/device:release/id/incremental:type/tags
+    void derive_from_fingerprint() {
+        auto fp = spoof.find("FINGERPRINT");
+        if (fp == spoof.end()) return;
+        const std::string &s = fp->second;
+
+        auto s1 = s.find('/');                       if (s1 == std::string::npos) return;
+        auto s2 = s.find('/', s1 + 1);               if (s2 == std::string::npos) return;
+        auto c1 = s.find(':', s2 + 1);               if (c1 == std::string::npos) return;
+        auto s3 = s.find('/', c1 + 1);               if (s3 == std::string::npos) return;
+        auto s4 = s.find('/', s3 + 1);               if (s4 == std::string::npos) return;
+        auto c2 = s.find(':', s4 + 1);               if (c2 == std::string::npos) return;
+
+        std::string brand   = s.substr(0, s1);
+        std::string product = s.substr(s1 + 1, s2 - s1 - 1);
+        std::string device  = s.substr(s2 + 1, c1 - s2 - 1);
+        std::string release = s.substr(c1 + 1, s3 - c1 - 1);
+        std::string bid     = s.substr(s3 + 1, s4 - s3 - 1);
+        std::string incr    = s.substr(s4 + 1, c2 - s4 - 1);
+        std::string rest    = s.substr(c2 + 1);
+        auto s5 = rest.find('/');
+        std::string type    = (s5 == std::string::npos) ? rest : rest.substr(0, s5);
+        std::string tags    = (s5 == std::string::npos) ? std::string() : rest.substr(s5 + 1);
+
+        auto fill = [&](const char *k, const std::string &v) {
+            if (!v.empty() && spoof.find(k) == spoof.end()) {
+                spoof[k] = v;
+                LOGD("derived %s = %s (from FINGERPRINT)", k, v.c_str());
+            }
+        };
+        fill("BRAND",       brand);
+        fill("PRODUCT",     product);
+        fill("DEVICE",      device);
+        fill("BOARD",       device);
+        fill("HARDWARE",    device);
+        fill("RELEASE",     release);
+        fill("ID",          bid);
+        fill("INCREMENTAL", incr);
+        fill("TYPE",        type);
+        fill("TAGS",        tags);
+    }
+
     void load_spoof_props() {
         spoof.clear();
-        // Ternak spoof.prop menang; kalau tidak ada, fallback ke PIF pif.prop.
         if (!parse_prop_file(SPOOF_FILE)) {
             parse_prop_file(PIF_FILE);
         }
+        derive_from_fingerprint();   // v1.1.0: safety net
     }
 
     // -------- JNI helpers --------
@@ -207,16 +244,18 @@ private:
             { "BOOTLOADER",     "BOOTLOADER",     build },
             { "HOST",           "HOST",           build },
             { "USER",           "USER",           build },
-            // VERSION.*
             { "RELEASE",        "RELEASE",        ver   },
             { "INCREMENTAL",    "INCREMENTAL",    ver   },
             { "SECURITY_PATCH", "SECURITY_PATCH", ver   },
             { "CODENAME",       "CODENAME",       ver   },
         };
-        int applied = 0;
+        int applied = 0, skipped = 0;
         for (auto &e : str_map) {
             auto it = spoof.find(e.key);
-            if (it == spoof.end() || !e.clazz) continue;
+            if (it == spoof.end() || !e.clazz) {
+                if (e.clazz) { ++skipped; LOGD("skip Build.%s — key %s tidak ada di spoof map", e.field, e.key); }
+                continue;
+            }
             set_static_string(e.clazz, e.field, it->second);
             ++applied;
             LOGD("%s.%s = %s",
@@ -224,7 +263,6 @@ private:
                  e.field, it->second.c_str());
         }
 
-        // Numeric fields
         auto sdk = spoof.find("SDK_INT");
         if (sdk != spoof.end() && ver) { int v = std::atoi(sdk->second.c_str()); if (v > 0) { set_static_int(ver, "SDK_INT", v); ++applied; } }
         auto first = spoof.find("DEVICE_INITIAL_SDK_INT");
@@ -235,7 +273,7 @@ private:
         if (build) env->DeleteLocalRef(build);
         if (ver)   env->DeleteLocalRef(ver);
 
-        LOGI("%s: %d Build fields spoofed", proc_name.c_str(), applied);
+        LOGI("%s: %d Build fields spoofed, %d skipped", proc_name.c_str(), applied, skipped);
     }
 };
 
