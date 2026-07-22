@@ -9,6 +9,7 @@
 #include <map>
 #include <vector>
 #include <sstream>
+#include <cstdlib>
 #include "zygisk.hpp"
 
 #define LOG_TAG "TernakZygisk"
@@ -171,8 +172,9 @@ static void apply_build_hooks(JNIEnv* env) {
 
         const std::string& t = lookup("TIME");
         if (!t.empty()) {
-            try { set_long(env, build, "TIME", (jlong)std::stoll(t)); }
-            catch (...) {}
+            char* end = nullptr;
+            long long v = strtoll(t.c_str(), &end, 10);
+            if (end != t.c_str()) set_long(env, build, "TIME", (jlong)v);
         }
         env->DeleteLocalRef(build);
     } else env->ExceptionClear();
@@ -189,10 +191,18 @@ static void apply_build_hooks(JNIEnv* env) {
         for (const auto& [f, k] : vstr) set_str(env, ver, f, lookup(k));
 
         const std::string& s = lookup("SDK_INT");
-        if (!s.empty()) { try { set_int(env, ver, "SDK_INT", std::stoi(s)); } catch (...) {} }
+        if (!s.empty()) {
+            char* end = nullptr;
+            long v = strtol(s.c_str(), &end, 10);
+            if (end != s.c_str()) set_int(env, ver, "SDK_INT", (jint)v);
+        }
 
         const std::string& si = lookup("DEVICE_INITIAL_SDK_INT");
-        if (!si.empty()) { try { set_int(env, ver, "DEVICE_INITIAL_SDK_INT", std::stoi(si)); } catch (...) {} }
+        if (!si.empty()) {
+            char* end = nullptr;
+            long v = strtol(si.c_str(), &end, 10);
+            if (end != si.c_str()) set_int(env, ver, "DEVICE_INITIAL_SDK_INT", (jint)v);
+        }
 
         env->DeleteLocalRef(ver);
     } else env->ExceptionClear();
