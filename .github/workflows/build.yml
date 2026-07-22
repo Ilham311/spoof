@@ -1,11 +1,15 @@
-name: Build Ternak v5.0
+name: Build Ternak & Auto Release
 
 on:
   push:
     branches: [main]
-    tags: ['v*']
+    tags: ['v*'] # Akan memicu auto-release jika ada push tag berawalan 'v' (contoh: v5.0)
   pull_request:
   workflow_dispatch:
+
+# Wajib ditambahkan agar Actions memiliki izin untuk membuat rilis di repository
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -43,16 +47,19 @@ jobs:
           done
 
       - name: Assemble module zip
+        env:
+          # Mengambil nama tag (misal: v5.0). Jika tidak ada tag (misal dari commit biasa), pakai 'dev'
+          VERSION_TAG: ${{ github.ref_name }} 
         run: |
           mkdir -p pkg/zygisk pkg/bin
 
-          # Zygisk .so per ABI (Zygisk framework expects <ABI>.so filename)
+          # Zygisk .so per ABI
           cp build/arm64-v8a/libternak.so   pkg/zygisk/arm64-v8a.so
           cp build/armeabi-v7a/libternak.so pkg/zygisk/armeabi-v7a.so
           cp build/x86_64/libternak.so      pkg/zygisk/x86_64.so
           cp build/x86/libternak.so         pkg/zygisk/x86.so
 
-          # ternakctl per ABI (customize.sh symlinks the right one)
+          # ternakctl per ABI
           cp build/arm64-v8a/ternakctl   pkg/bin/ternakctl-arm64
           cp build/armeabi-v7a/ternakctl pkg/bin/ternakctl-arm
           cp build/x86_64/ternakctl      pkg/bin/ternakctl-x86_64
@@ -61,7 +68,7 @@ jobs:
           # Shell + install config + JSON pool
           cp module.prop action.sh service.sh customize.sh pool.json pkg/
 
-          # resetprop-rs prebuilt (drop manual dari release upstream ke prebuilt/)
+          # resetprop-rs prebuilt
           if [ -f prebuilt/resetprop-rs ]; then
             cp prebuilt/resetprop-rs pkg/bin/
             chmod +x pkg/bin/resetprop-rs
@@ -69,17 +76,23 @@ jobs:
             echo "! WARNING: prebuilt/resetprop-rs missing — zip akan tanpa resetprop"
           fi
 
-          cd pkg && zip -r ../ternak-v5.0.0-pure-zygisk.zip .
+          # Buat variabel nama ZIP dinamis dan simpan ke environment variables Github
+          ZIP_NAME="ternak-${VERSION_TAG}-pure-zygisk.zip"
+          echo "ZIP_NAME=$ZIP_NAME" >> $GITHUB_ENV
 
-      - name: Upload artifact
+          cd pkg && zip -r "../$ZIP_NAME" .
+
+      - name: Upload artifact (GitHub Actions Panel)
         uses: actions/upload-artifact@v4
         with:
-          name: ternak-v5.0.0-pure-zygisk
-          path: ternak-v5.0.0-pure-zygisk.zip
+          name: ${{ env.ZIP_NAME }}
+          path: ${{ env.ZIP_NAME }}
 
-      - name: Release
+      - name: Auto Release to GitHub
+        # Step ini hanya berjalan jika ada push berupa tag (misal: git tag v5.0 && git push --tags)
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: ternak-v5.0.0-pure-zygisk.zip
+          files: ${{ env.ZIP_NAME }}
           generate_release_notes: true
+          # name: Release ${{ github.ref_name }} # Opsional: jika ingin nama rilis otomatis
