@@ -43,6 +43,23 @@ jobs:
           # Only commit and push if there are changes
           git diff --quiet && git diff --staged --quiet || (git commit -m "chore: update update.json for ${{ steps.get_version.outputs.VERSION }} [skip ci]" && git push)
 
+      - name: Setup NDK
+        uses: nttld/setup-ndk@v1
+        id: setup-ndk
+        with:
+          ndk-version: r27c
+          local-cache: false
+
+      - name: Install Ninja
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
+
+      - name: Build Zygisk module
+        run: |
+          cd sources
+          ./build.sh
+        env:
+          NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+
       - name: Create Zip Archive
         run: |
           ZIP_NAME="ternak_device_changer_${{ steps.get_version.outputs.VERSION }}.zip"
