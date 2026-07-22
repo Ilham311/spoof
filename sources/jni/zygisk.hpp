@@ -1,29 +1,99 @@
-/*
- * Copyright 2022-2023 John "topjohnwu" Wu
+/* Copyright 2022-2023 John "topjohnwu" Wu
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
+ * Permission to use, copy, modify, and/or distribute this software for any
+ * purpose with or without fee is hereby granted.
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH
+ * REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY
+ * AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT,
+ * INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM
+ * LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR
+ * OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
+ * PERFORMANCE OF THIS SOFTWARE.
  */
+
+// This is the public API for Zygisk modules.
+// DO NOT MODIFY ANY CODE IN THIS HEADER.
 
 #pragma once
 
 #include <jni.h>
-#include <stdint.h>
 
 #define ZYGISK_API_VERSION 4
 
 /*
- * Zygisk API v4
- */
+
+***************
+* Introduction
+***************
+
+On Android, all app processes are forked from a special daemon called "Zygote".
+For each new app process, zygote will fork a new process and perform "specialization".
+This specialization operation enforces the Android security sandbox on the newly forked
+process to make sure that 3rd party application code is only loaded after it is being
+restricted within a sandbox.
+
+On Android, there is also this special process called "system_server". This single
+process hosts a significant portion of system services, which controls how the
+Android operating system and apps interact with each other.
+
+The Zygisk framework provides a way to allow developers to build modules and run custom
+code before and after system_server and any app processes' specialization.
+This enable developers to inject code and alter the behavior of system_server and app processes.
+
+Please note that modules will only be loaded after zygote has forked the child process.
+THIS MEANS ALL OF YOUR CODE RUNS IN THE APP/SYSTEM_SERVER PROCESS, NOT THE ZYGOTE DAEMON!
+
+*********************
+* Development Guide
+*********************
+
+Define a class and inherit zygisk::ModuleBase to implement the functionality of your module.
+Use the macro REGISTER_ZYGISK_MODULE(className) to register that class to Zygisk.
+
+Example code:
+
+static jint (*orig_logger_entry_max)(JNIEnv *env);
+static jint my_logger_entry_max(JNIEnv *env) { return orig_logger_entry_max(env); }
+
+class ExampleModule : public zygisk::ModuleBase {
+public:
+    void onLoad(zygisk::Api *api, JNIEnv *env) override {
+        this->api = api;
+        this->env = env;
+    }
+    void preAppSpecialize(zygisk::AppSpecializeArgs *args) override {
+        JNINativeMethod methods[] = {
+            { "logger_entry_max_payload_native", "()I", (void*) my_logger_entry_max },
+        };
+        api->hookJniNativeMethods(env, "android/util/Log", methods, 1);
+        *(void **) &orig_logger_entry_max = methods[0].fnPtr;
+    }
+private:
+    zygisk::Api *api;
+    JNIEnv *env;
+};
+
+REGISTER_ZYGISK_MODULE(ExampleModule)
+
+-----------------------------------------------------------------------------------------
+
+Since your module class's code runs with either Zygote's privilege in pre[XXX]Specialize,
+or runs in the sandbox of the target process in post[XXX]Specialize, the code in your class
+never runs in a true superuser environment.
+
+If your module require access to superuser permissions, you can create and register
+a root companion handler function. This function runs in a separate root companion
+daemon process, and an Unix domain socket is provided to allow you to perform IPC between
+your target process and the root companion process.
+
+Example code:
+
+static void example_handler(int socket) { ... }
+
+REGISTER_ZYGISK_COMPANION(example_handler)
+
+*/
 
 namespace zygisk {
 
@@ -31,180 +101,291 @@ struct Api;
 struct AppSpecializeArgs;
 struct ServerSpecializeArgs;
 
-enum Option : uint32_t {
-    /**
-     * Force Magisk's denylist unmount routine to run on this process.
-     *
-     * Setting this option only makes sense in preAppSpecialize.
-     * The actual unmounting happens during app process specialization.
-     *
-     * Set this option when you want to hide Magisk and Zygisk from this process.
-     */
-    FORCE_DENYLIST_UNMOUNT = 0,
-
-    /**
-     * When this option is set, your module's library will be dlclose-ed after post[XXX]Specialize.
-     *
-     * Be aware that after dlclose-ing your module, all of your PLT hooks will be unregistered.
-     */
-    DLCLOSE_MODULE_LIBRARY = 1,
-};
-
-enum StateFlag : uint32_t {
-    /**
-     * The user has granted root access to this process
-     */
-    PROCESS_GRANTED_ROOT = (1 << 0),
-
-    /**
-     * This process was added to the denylist
-     */
-    PROCESS_ON_DENYLIST = (1 << 1),
-};
-
 class ModuleBase {
 public:
-    /**
-     * This method is called as soon as the module is loaded into the zygote process.
-     *
-     * @param api  a pointer to the Zygisk API. This pointer is valid throughout the whole lifecycle of the zygote process.
-     * @param env  a pointer to the JNIEnv of the zygote process.
-     */
-    virtual void onLoad(Api *api, JNIEnv *env) {}
 
-    /**
-     * This method is called before the app process is specialized.
-     *
-     * @param args  a pointer to the AppSpecializeArgs. The structure is NOT valid after this method returns.
-     */
-    virtual void preAppSpecialize(AppSpecializeArgs *args) {}
+    // This method is called as soon as the module is loaded into the target process.
+    // A Zygisk API handle will be passed as an argument.
+    virtual void onLoad([[maybe_unused]] Api *api, [[maybe_unused]] JNIEnv *env) {}
 
-    /**
-     * This method is called after the app process is specialized.
-     */
-    virtual void postAppSpecialize(const AppSpecializeArgs *args) {}
+    // This method is called before the app process is specialized.
+    // At this point, the process just got forked from zygote, but no app specific specialization
+    // is applied. This means that the process does not have any sandbox restrictions and
+    // still runs with the same privilege of zygote.
+    //
+    // All the arguments that will be sent and used for app specialization is passed as a single
+    // AppSpecializeArgs object. You can read and overwrite these arguments to change how the app
+    // process will be specialized.
+    //
+    // If you need to run some operations as superuser, you can call Api::connectCompanion() to
+    // get a socket to do IPC calls with a root companion process.
+    // See Api::connectCompanion() for more info.
+    virtual void preAppSpecialize([[maybe_unused]] AppSpecializeArgs *args) {}
 
-    /**
-     * This method is called before the system server process is specialized.
-     *
-     * @param args  a pointer to the ServerSpecializeArgs. The structure is NOT valid after this method returns.
-     */
-    virtual void preServerSpecialize(ServerSpecializeArgs *args) {}
+    // This method is called after the app process is specialized.
+    // At this point, the process has all sandbox restrictions enabled for this application.
+    // This means that this method runs with the same privilege of the app's own code.
+    virtual void postAppSpecialize([[maybe_unused]] const AppSpecializeArgs *args) {}
 
-    /**
-     * This method is called after the system server process is specialized.
-     */
-    virtual void postServerSpecialize(const ServerSpecializeArgs *args) {}
+    // This method is called before the system server process is specialized.
+    // See preAppSpecialize(args) for more info.
+    virtual void preServerSpecialize([[maybe_unused]] ServerSpecializeArgs *args) {}
+
+    // This method is called after the system server process is specialized.
+    // At this point, the process runs with the privilege of system_server.
+    virtual void postServerSpecialize([[maybe_unused]] const ServerSpecializeArgs *args) {}
 };
 
 struct AppSpecializeArgs {
     // Required arguments. These arguments are guaranteed to exist on all Android versions.
-    int &uid;
-    int &gid;
+    jint &uid;
+    jint &gid;
     jintArray &gids;
-    int &runtime_flags;
-    int &rlimits;
-    int &mount_external;
+    jint &runtime_flags;
+    jobjectArray &rlimits;
+    jint &mount_external;
     jstring &se_info;
     jstring &nice_name;
-    jintArray &instruction_set;
+    jstring &instruction_set;
     jstring &app_data_dir;
 
-    // Optional arguments. Please check whether the pointer is null before dereferencing
-    jboolean *is_top_app;
-    jboolean *is_child_zygote;
-    jobjectArray *pkg_data_info_list;
-    jobjectArray *whitelisted_data_info_list;
-    jboolean *mount_data_dirs;
-    jboolean *mount_storage_dirs;
-    jintArray *fds_to_ignore;
+    // Optional arguments. Please check whether the pointer is null before de-referencing
+    jintArray *const fds_to_ignore;
+    jboolean *const is_child_zygote;
+    jboolean *const is_top_app;
+    jobjectArray *const pkg_data_info_list;
+    jobjectArray *const whitelisted_data_info_list;
+    jboolean *const mount_data_dirs;
+    jboolean *const mount_storage_dirs;
+
+    AppSpecializeArgs() = delete;
 };
 
 struct ServerSpecializeArgs {
-    int &uid;
-    int &gid;
+    jint &uid;
+    jint &gid;
     jintArray &gids;
-    int &runtime_flags;
+    jint &runtime_flags;
     jlong &permitted_capabilities;
     jlong &effective_capabilities;
+
+    ServerSpecializeArgs() = delete;
 };
 
+namespace internal {
+struct api_table;
+template <class T> void entry_impl(api_table *, JNIEnv *);
+}
+
+// These values are used in Api::setOption(Option)
+enum Option : int {
+    // Force Magisk's denylist unmount routines to run on this process.
+    //
+    // Setting this option only makes sense in preAppSpecialize.
+    // The actual unmounting happens during app process specialization.
+    //
+    // Set this option to force all Magisk and modules' files to be unmounted from the
+    // mount namespace of the process, regardless of the denylist enforcement status.
+    FORCE_DENYLIST_UNMOUNT = 0,
+
+    // When this option is set, your module's library will be dlclose-ed after post[XXX]Specialize.
+    // Be aware that after dlclose-ing your module, all of your code will be unmapped from memory.
+    // YOU MUST NOT ENABLE THIS OPTION AFTER HOOKING ANY FUNCTIONS IN THE PROCESS.
+    DLCLOSE_MODULE_LIBRARY = 1,
+};
+
+// Bit masks of the return value of Api::getFlags()
+enum StateFlag : uint32_t {
+    // The user has granted root access to the current process
+    PROCESS_GRANTED_ROOT = (1u << 0),
+
+    // The current process was added on the denylist
+    PROCESS_ON_DENYLIST = (1u << 1),
+};
+
+// All API methods will stop working after post[XXX]Specialize as Zygisk will be unloaded
+// from the specialized process afterwards.
 struct Api {
-    /**
-     * Connect to a daemon process and get a file descriptor.
-     *
-     * The companion process is started by Magisk. You can use this file descriptor to communicate with the daemon process.
-     * This process has the same privileges as the Magisk daemon (root).
-     *
-     * @return a file descriptor to the daemon process. Returns -1 if the connection failed.
-     */
-    virtual int connectCompanion() = 0;
 
-    /**
-     * Get the file descriptor of the module directory.
-     *
-     * This directory is strictly for the module's own usage, no other process has access to it.
-     *
-     * @return a file descriptor to the module directory. Returns -1 if the operation failed.
-     */
-    virtual int getModuleDir() = 0;
+    // Connect to a root companion process and get a Unix domain socket for IPC.
+    //
+    // This API only works in the pre[XXX]Specialize methods due to SELinux restrictions.
+    //
+    // The pre[XXX]Specialize methods run with the same privilege of zygote.
+    // If you would like to do some operations with superuser permissions, register a handler
+    // function that would be called in the root process with REGISTER_ZYGISK_COMPANION(func).
+    // Another good use case for a companion process is that if you want to share some resources
+    // across multiple processes, hold the resources in the companion process and pass it over.
+    //
+    // The root companion process is ABI aware; that is, when calling this method from a 32-bit
+    // process, you will be connected to a 32-bit companion process, and vice versa for 64-bit.
+    //
+    // Returns a file descriptor to a socket that is connected to the socket passed to your
+    // module's companion request handler. Returns -1 if the connection attempt failed.
+    int connectCompanion();
 
-    /**
-     * Set an option for the current process.
-     *
-     * @param opt  the option to set.
-     */
-    virtual void setOption(Option opt) = 0;
+    // Get the file descriptor of the root folder of the current module.
+    //
+    // This API only works in the pre[XXX]Specialize methods.
+    // Accessing the directory returned is only possible in the pre[XXX]Specialize methods
+    // or in the root companion process (assuming that you sent the fd over the socket).
+    // Both restrictions are due to SELinux and UID.
+    //
+    // Returns -1 if errors occurred.
+    int getModuleDir();
 
-    /**
-     * Get the state flags of the current process.
-     *
-     * @return a bitmask of StateFlag.
-     */
-    virtual uint32_t getFlags() = 0;
+    // Set various options for your module.
+    // Please note that this method accepts one single option at a time.
+    // Check zygisk::Option for the full list of options available.
+    void setOption(Option opt);
 
-    /**
-     * Hook a PLT entry in the current process.
-     *
-     * @param target_so_path   the path to the shared object to hook.
-     * @param symbol           the name of the symbol to hook.
-     * @param new_func         a pointer to the new function.
-     * @param old_func         a pointer to a pointer where the original function address will be stored.
-     */
-    virtual void pltHookRegister(const char *target_so_path, const char *symbol, void *new_func, void **old_func) = 0;
+    // Get information about the current process.
+    // Returns bitwise-or'd zygisk::StateFlag values.
+    uint32_t getFlags();
 
-    /**
-     * Exclude a PLT entry from being hooked.
-     *
-     * @param target_so_path   the path to the shared object.
-     * @param symbol           the name of the symbol to exclude.
-     */
-    virtual void pltHookExclude(const char *target_so_path, const char *symbol) = 0;
+    // Exempt the provided file descriptor from being automatically closed.
+    //
+    // This API only make sense in preAppSpecialize; calling this method in any other situation
+    // is either a no-op (returns true) or an error (returns false).
+    //
+    // When false is returned, the provided file descriptor will eventually be closed by zygote.
+    bool exemptFd(int fd);
 
-    /**
-     * Commit all registered PLT hooks.
-     *
-     * @return true if all hooks are successfully committed.
-     */
-    virtual bool pltHookCommit() = 0;
+    // Hook JNI native methods for a class
+    //
+    // Lookup all registered JNI native methods and replace it with your own methods.
+    // The original function pointer will be saved in each JNINativeMethod's fnPtr.
+    // If no matching class, method name, or signature is found, that specific JNINativeMethod.fnPtr
+    // will be set to nullptr.
+    void hookJniNativeMethods(JNIEnv *env, const char *className, JNINativeMethod *methods, int numMethods);
+
+    // Hook functions in the PLT (Procedure Linkage Table) of ELFs loaded in memory.
+    //
+    // Parsing /proc/[PID]/maps will give you the memory map of a process. As an example:
+    //
+    //       <address>       <perms>  <offset>   <dev>  <inode>           <pathname>
+    // 56b4346000-56b4347000  r-xp    00002000   fe:00    235       /system/bin/app_process64
+    // (More details: https://man7.org/linux/man-pages/man5/proc.5.html)
+    //
+    // The `dev` and `inode` pair uniquely identifies a file being mapped into memory.
+    // For matching ELFs loaded in memory, replace function `symbol` with `newFunc`.
+    // If `oldFunc` is not nullptr, the original function pointer will be saved to `oldFunc`.
+    void pltHookRegister(dev_t dev, ino_t inode, const char *symbol, void *newFunc, void **oldFunc);
+
+    // Commit all the hooks that was previously registered.
+    // Returns false if an error occurred.
+    bool pltHookCommit();
+
+private:
+    internal::api_table *tbl;
+    template <class T> friend void internal::entry_impl(internal::api_table *, JNIEnv *);
 };
+
+// Register a class as a Zygisk module
+
+#define REGISTER_ZYGISK_MODULE(clazz) \
+void zygisk_module_entry(zygisk::internal::api_table *table, JNIEnv *env) { \
+    zygisk::internal::entry_impl<clazz>(table, env);                        \
+}
+
+// Register a root companion request handler function for your module
+//
+// The function runs in a superuser daemon process and handles a root companion request from
+// your module running in a target process. The function has to accept an integer value,
+// which is a Unix domain socket that is connected to the target process.
+// See Api::connectCompanion() for more info.
+//
+// NOTE: the function can run concurrently on multiple threads.
+// Be aware of race conditions if you have globally shared resources.
+
+#define REGISTER_ZYGISK_COMPANION(func) \
+void zygisk_companion_entry(int client) { func(client); }
+
+/*********************************************************
+ * The following is internal ABI implementation detail.
+ * You do not have to understand what it is doing.
+ *********************************************************/
+
+namespace internal {
+
+struct module_abi {
+    long api_version;
+    ModuleBase *impl;
+
+    void (*preAppSpecialize)(ModuleBase *, AppSpecializeArgs *);
+    void (*postAppSpecialize)(ModuleBase *, const AppSpecializeArgs *);
+    void (*preServerSpecialize)(ModuleBase *, ServerSpecializeArgs *);
+    void (*postServerSpecialize)(ModuleBase *, const ServerSpecializeArgs *);
+
+    module_abi(ModuleBase *module) : api_version(ZYGISK_API_VERSION), impl(module) {
+        preAppSpecialize = [](auto m, auto args) { m->preAppSpecialize(args); };
+        postAppSpecialize = [](auto m, auto args) { m->postAppSpecialize(args); };
+        preServerSpecialize = [](auto m, auto args) { m->preServerSpecialize(args); };
+        postServerSpecialize = [](auto m, auto args) { m->postServerSpecialize(args); };
+    }
+};
+
+struct api_table {
+    // Base
+    void *impl;
+    bool (*registerModule)(api_table *, module_abi *);
+
+    void (*hookJniNativeMethods)(JNIEnv *, const char *, JNINativeMethod *, int);
+    void (*pltHookRegister)(dev_t, ino_t, const char *, void *, void **);
+    bool (*exemptFd)(int);
+    bool (*pltHookCommit)();
+    int  (*connectCompanion)(void * /* impl */);
+    void (*setOption)(void * /* impl */, Option);
+    int  (*getModuleDir)(void * /* impl */);
+    uint32_t (*getFlags)(void * /* impl */);
+};
+
+template <class T>
+void entry_impl(api_table *table, JNIEnv *env) {
+    static Api api;
+    api.tbl = table;
+    static T module;
+    ModuleBase *m = &module;
+    static module_abi abi(m);
+    if (!table->registerModule(table, &abi)) return;
+    m->onLoad(&api, env);
+}
+
+} // namespace internal
+
+inline int Api::connectCompanion() {
+    return tbl->connectCompanion ? tbl->connectCompanion(tbl->impl) : -1;
+}
+inline int Api::getModuleDir() {
+    return tbl->getModuleDir ? tbl->getModuleDir(tbl->impl) : -1;
+}
+inline void Api::setOption(Option opt) {
+    if (tbl->setOption) tbl->setOption(tbl->impl, opt);
+}
+inline uint32_t Api::getFlags() {
+    return tbl->getFlags ? tbl->getFlags(tbl->impl) : 0;
+}
+inline bool Api::exemptFd(int fd) {
+    return tbl->exemptFd != nullptr && tbl->exemptFd(fd);
+}
+inline void Api::hookJniNativeMethods(JNIEnv *env, const char *className, JNINativeMethod *methods, int numMethods) {
+    if (tbl->hookJniNativeMethods) tbl->hookJniNativeMethods(env, className, methods, numMethods);
+}
+inline void Api::pltHookRegister(dev_t dev, ino_t inode, const char *symbol, void *newFunc, void **oldFunc) {
+    if (tbl->pltHookRegister) tbl->pltHookRegister(dev, inode, symbol, newFunc, oldFunc);
+}
+inline bool Api::pltHookCommit() {
+    return tbl->pltHookCommit != nullptr && tbl->pltHookCommit();
+}
 
 } // namespace zygisk
 
 extern "C" {
 
-void zygisk_module_entry(zygisk::Api *api, JNIEnv *env);
-void zygisk_companion_entry(int client);
-__attribute__((weak)) void zygisk_internal_register_module(void *api, void *env, void *module);
+[[gnu::visibility("default"), maybe_unused]]
+void zygisk_module_entry(zygisk::internal::api_table *, JNIEnv *);
 
-}
+[[gnu::visibility("default"), maybe_unused]]
+void zygisk_companion_entry(int);
 
-#define REGISTER_ZYGISK_MODULE(clazz) \
-void zygisk_module_entry(zygisk::Api *api, JNIEnv *env) { \
-    zygisk_internal_register_module(api, env, new clazz()); \
-}
-
-#define REGISTER_ZYGISK_COMPANION(func) \
-void zygisk_companion_entry(int client) { \
-    func(client); \
-}
+} // extern "C"

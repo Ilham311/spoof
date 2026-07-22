@@ -1,42 +1,51 @@
 #!/usr/bin/env bash
+# build.sh — build ternak_zygisk untuk semua ABI Android modern.
+# Butuh: Android NDK r26+ terpasang, env NDK_HOME.
 set -euo pipefail
 
-if [ -z "${NDK_HOME:-}" ] && [ -z "${ANDROID_NDK_HOME:-}" ]; then
-    echo "Error: NDK_HOME or ANDROID_NDK_HOME must be set"
-    exit 1
+NDK="${NDK_HOME:-${ANDROID_NDK_HOME:-}}"
+[ -z "$NDK" ] && { echo "Set NDK_HOME atau ANDROID_NDK_HOME"; exit 1; }
+[ -e "$NDK/build/cmake/android.toolchain.cmake" ] || { echo "NDK invalid: $NDK"; exit 1; }
+chmod -R a+x "$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin" 2>/dev/null || true
+
+# Beberapa action (misal nttld/setup-ndk) mengekstrak NDK ke direktori yang
+# namanya berbeda dari folder asli (mis. "r27c" alih-alih "android-ndk-r27c").
+# Akibatnya symlink clang/clang++ di dalam NDK -- yang memakai path relatif
+# menunjuk ke nama folder asli -- menjadi broken symlink ("not a full path to
+# an existing compiler tool"). Perbaiki dengan membuat ulang symlink tersebut
+# agar menunjuk ke target yang benar relatif terhadap $NDK saat ini.
+BIN_DIR="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
+if [ -d "$BIN_DIR" ]; then
+    for link in "$BIN_DIR"/clang "$BIN_DIR"/clang++; do
+        [ -L "$link" ] || continue
+        [ -e "$link" ] && continue
+        target="$(readlink "$link")"
+        case "$target" in
+            */toolchains/*)
+                fixed="$NDK/toolchains/${target#*/toolchains/}"
+                [ -e "$fixed" ] && ln -sf "$fixed" "$link"
+                ;;
+        esac
+    done
 fi
 
-NDK_PATH="${NDK_HOME:-${ANDROID_NDK_HOME:-}}"
-
-if [ ! -d "$NDK_PATH" ]; then
-    echo "Error: NDK_PATH '$NDK_PATH' is not a valid directory"
-    exit 1
-fi
-
-CLANGXX=$(ls "$NDK_PATH"/toolchains/llvm/prebuilt/*/bin/clang++ 2>/dev/null | head -n1)
-if [ -z "$CLANGXX" ] || [ ! -x "$CLANGXX" ]; then
-    echo "Error: clang++ not found under '$NDK_PATH/toolchains/llvm/prebuilt' (NDK installation looks incomplete)"
-    exit 1
-fi
-
-API=26
-ABIS=("arm64-v8a" "armeabi-v7a" "x86_64" "x86")
-
-mkdir -p ../module/zygisk
+API=26                                   # min Android 8 (Zygisk sendiri butuh 26+)
+ABIS=(arm64-v8a armeabi-v7a x86_64 x86)
+OUT="../module/zygisk"
+mkdir -p "$OUT"
 
 for abi in "${ABIS[@]}"; do
-    echo "Building for $abi..."
-    cmake -S . -B "build/$abi" \
-        -DCMAKE_TOOLCHAIN_FILE="$NDK_PATH/build/cmake/android.toolchain.cmake" \
+    echo ">>> Building $abi"
+    rm -rf "build/$abi"
+    cmake -S . -B "build/$abi" -G Ninja \
+        -DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake" \
         -DANDROID_ABI="$abi" \
         -DANDROID_PLATFORM="android-$API" \
-        -DCMAKE_BUILD_TYPE=MinSizeRel \
-        -DANDROID_STL=none
-
-    cmake --build "build/$abi" -j"$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)"
-
-    cp "build/$abi/libternak_zygisk.so" "../module/zygisk/$abi.so"
+        -DANDROID_STL=c++_static \
+        -DCMAKE_BUILD_TYPE=MinSizeRel
+    cmake --build "build/$abi" -j
+    cp "build/$abi/libternak_zygisk.so" "$OUT/$abi.so"
+    ls -lh "$OUT/$abi.so"
 done
 
-echo "Build complete. Output sizes:"
-ls -lh ../module/zygisk/*.so
+echo ">>> Done. SO tersedia di $OUT/"

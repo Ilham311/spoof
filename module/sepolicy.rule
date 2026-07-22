@@ -1,1 +1,2 @@
-# no extra sepolicy rules needed
+# Placeholder — tidak ada rule ekstra dibutuhkan.
+# Zygisk sudah handle context untuk .so yg dimuat ke Zygote.
