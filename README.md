@@ -1,6 +1,6 @@
 # Ternak Device Changer (shell + Zygisk)
 
-[![build](https://github.com/diru768/ternak-repo/actions/workflows/build.yml/badge.svg)](https://github.com/diru768/ternak-repo/actions/workflows/build.yml)
+[![build](https://github.com/Ilham311/spoof/actions/workflows/build.yml/badge.svg)](https://github.com/Ilham311/spoof/actions/workflows/build.yml)
 
 ## Overview
 Modul Magisk/KernelSU untuk mengubah identitas device (spoofing) di level shell dan JNI. Modul ini menggabungkan script shell-level identity forge dengan companion C++ Zygisk yang melakukan hooking pada field `android.os.Build` secara spesifik per-target aplikasi.

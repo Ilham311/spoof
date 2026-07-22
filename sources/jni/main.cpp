@@ -75,6 +75,7 @@ public:
 
         bool is_target = false;
 
+        bool has_valid_targets = false;
         FILE* targets_fp = fopen(TARGETS_FILE, "r");
         if (targets_fp) {
             char line[256];
@@ -95,11 +96,17 @@ public:
                         continue;
                     }
                     *star_pos = '\0';
+                    if (p[0] == '\0') {
+                        LOGW("Empty wildcard prefix, skipping line");
+                        continue;
+                    }
+                    has_valid_targets = true;
                     if (strncmp(process_name, p, strlen(p)) == 0) {
                         is_target = true;
                         break;
                     }
                 } else {
+                    has_valid_targets = true;
                     if (strcmp(process_name, p) == 0) {
                         is_target = true;
                         break;
@@ -107,7 +114,9 @@ public:
                 }
             }
             fclose(targets_fp);
-        } else {
+        }
+
+        if (!has_valid_targets) {
             const char* defaults[] = {
                 "com.shopee.id",
                 "com.tokopedia.tkpd",
