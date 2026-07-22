@@ -1,9 +1,9 @@
 #!/system/bin/sh
 # ============================================================
 # Ternak Device Changer — core.sh
-# v4.12-a15-rs (Flagless / Bootloop-Safe / resetprop-rs native / PIF-aware / deep-clear)
+# v4.13-a15-rs (spoof.prop always written; Zygisk full-field fix)
 # ============================================================
-VERSION="4.12-a15-rs"
+VERSION="4.13-a15-rs"
 
 MODDIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
 [ -z "$MODDIR" ] && MODDIR="/data/adb/modules/ternak_device_changer"
@@ -31,7 +31,7 @@ log_warn() { log "[!] $1"; }
 log_err()  { log "[-] $1"; }
 log_step() { log "[...] $1"; }
 
-# === SELinux helper (depth-counter, anti bocor saat nested) ===
+# === SELinux helper (depth-counter) ===
 SE_DEPTH=0
 SE_ORIG=""
 se_permissive() {
@@ -58,7 +58,7 @@ settings_del() { cmd settings delete "$1" "$2" 2>/dev/null || settings delete "$
 force_stop()   { cmd activity force-stop "$1" 2>/dev/null || am force-stop "$1" 2>/dev/null; }
 
 # ============================================================
-# resetprop-rs — WAJIB. TIDAK ADA fallback ke resetprop legacy.
+# resetprop-rs — WAJIB
 # ============================================================
 RP=""
 RP_RS="$MODDIR/bin/resetprop-rs"
@@ -84,18 +84,15 @@ detect_resetprop() {
     if rp_stealth_selftest; then
         RP_STEALTH_OK=1; log_info "stealth (-st) OK"
     else
-        RP_STEALTH_OK=0; log_warn "stealth (-st) gagal selftest — pakai resetprop-rs mode -n (tetap rs, non-stealth)"
+        RP_STEALTH_OK=0; log_warn "stealth (-st) gagal selftest — pakai resetprop-rs mode -n"
     fi
     return 0
 }
-# _rp_put: satu percobaan tulis (stealth jika sehat, else -n; keduanya via resetprop-rs)
-# persist.* otomatis pakai -p (memori + /data/property/, tahan reboot)
 _rp_put() {
     case "$1" in persist.*) _P="-p" ;; *) _P="" ;; esac
     if [ "$RP_STEALTH_OK" = "1" ]; then "$RP" -st $_P "$1" "$2" 2>/dev/null
     else "$RP" -n $_P "$1" "$2" 2>/dev/null; fi
 }
-# rp_set: tulis + verify + retry; last resort -n (MASIH resetprop-rs, bukan legacy)
 rp_set() {
     k="$1"; v="$2"
     [ -z "$RP" ] && return 1
@@ -106,7 +103,7 @@ rp_set() {
         got=$(getprop "$k" 2>/dev/null)
     fi
     if [ "$got" != "$v" ] && [ "$RP_STEALTH_OK" = "1" ]; then
-        case "$k" in persist.*) "$RP" -n -p "$k" "$v" 2>/dev/null ;; *) "$RP" -n "$k" "$v" 2>/dev/null ;; esac   # fallback (masih rs, non-stealth)
+        case "$k" in persist.*) "$RP" -n -p "$k" "$v" 2>/dev/null ;; *) "$RP" -n "$k" "$v" 2>/dev/null ;; esac
         got=$(getprop "$k" 2>/dev/null)
     fi
     [ "$got" != "$v" ] && log_warn "prop $k gagal (want=$v got=$got)"
@@ -121,8 +118,6 @@ rp_seal() {
 }
 rp() { rp_set "$1" "$2"; }
 
-# rp_bulk: tulis banyak prop sekaligus via -f (1 proses) lalu rekonsiliasi.
-# stdin = baris "key value"; yang belum nempel di-retry via rp_set (verify+retry).
 rp_bulk() {
     [ -z "$RP" ] && return 1
     bf="$MODDIR/.ternak_bulk.$$"
@@ -144,10 +139,8 @@ seal_all() {
     [ -f "$PROFILE_FILE" ] || { log_warn "no active profile to seal"; return 1; }
     pname=$(cut -d'|' -f1 "$PROFILE_FILE")
     load_profile "$pname" >/dev/null 2>&1 || return 1
-    log_step "Sealing display props (Tier B batch, 1x attach ke init)..."
-    # dry-run dulu: validasi splice-site di init tanpa menulis apa pun
-    if "$RP" --seal ro.product.model --check >/dev/null 2>&1; then log_info "seal --check OK (Tier B installable)"; else log_warn "seal --check gagal — Tier B mungkin tidak stabil di init device ini"; fi
-    # SATU invocation utk semua prop (set -- menjaga nilai berspasi spt "Pixel 9 Pro XL")
+    log_step "Sealing display props (Tier B batch)..."
+    if "$RP" --seal ro.product.model --check >/dev/null 2>&1; then log_info "seal --check OK"; else log_warn "seal --check gagal"; fi
     set -- --seal ro.product.brand "$P_BRAND" \
            --seal ro.product.manufacturer "$P_MANUFACTURER" \
            --seal ro.product.model "$P_MODEL" \
@@ -156,12 +149,12 @@ seal_all() {
            --seal ro.build.fingerprint "$P_FINGERPRINT" \
            --seal ro.build.id "$P_BUILD_ID"
     if "$RP" "$@" 2>/dev/null; then
-        log_ok "Sealed (Tier B batch, in-session)."
+        log_ok "Sealed (Tier B batch)."
     else
-        log_warn "Tier B batch gagal — fallback Tier A per-prop (--seal-arena)."
+        log_warn "Tier B batch gagal — fallback Tier A per-prop."
         rp_seal ro.product.brand "$P_BRAND"; rp_seal ro.product.model "$P_MODEL"; rp_seal ro.build.fingerprint "$P_FINGERPRINT"
     fi
-    log_info "Seal in-session; RE-SEAL tiap boot via post-fs-data.sh. ro.boot.*/serial/secure DIDELEGASIKAN ke PIF."
+    log_info "Seal in-session; RE-SEAL tiap boot via post-fs-data.sh."
 }
 
 # === Random generators ===
@@ -169,13 +162,11 @@ generate_hex()  { dd if=/dev/urandom bs=1 count=$(( ($1 + 1) / 2 )) 2>/dev/null 
 generate_uuid() {
     u=$(cat /proc/sys/kernel/random/uuid 2>/dev/null)
     if [ -n "$u" ]; then echo "$u"; return; fi
-    # fallback: set versi 4 + variant bits (8/9/a/b) sesuai RFC 4122
     var=$(printf '%x' $(( ( 0x$(generate_hex 1) & 0x3 ) | 0x8 )))
     echo "$(generate_hex 8)-$(generate_hex 4)-4$(generate_hex 3)-${var}$(generate_hex 3)-$(generate_hex 12)"
 }
 generate_serial_samsung() { raw=$(dd if=/dev/urandom bs=1 count=64 2>/dev/null | tr -dc 'A-Z0-9' | cut -c1-10); echo "R${raw}"; }
 generate_serial_generic() { generate_hex 16 | tr 'a-f' 'A-F'; }
-# MAC: FIX — set locally-administered (0x02), clear multicast (bersih 0x01)
 generate_mac() {
     b1_raw=$(dd if=/dev/urandom bs=1 count=1 2>/dev/null | od -An -tx1 | tr -d ' \n')
     b1_dec=$(( (0x${b1_raw} & 0xFE) | 0x02 ))
@@ -184,12 +175,12 @@ generate_mac() {
     echo "${b1}:$(echo $rest | cut -c1-2):$(echo $rest | cut -c3-4):$(echo $rest | cut -c5-6):$(echo $rest | cut -c7-8):$(echo $rest | cut -c9-10)"
 }
 
-# === Device profile pool ===
-profile_pixel9pro() { PROFILE_NAME="Pixel 9 Pro XL"; P_BRAND="google"; P_MANUFACTURER="Google"; P_MODEL="Pixel 9 Pro XL"; P_DEVICE="komodo"; P_PRODUCT="komodo"; P_BOARD="komodo"; P_HARDWARE="komodo"; P_PLATFORM="zuma_pro"; P_FINGERPRINT="google/komodo/komodo:15/AP3A.241105.007/12686056:user/release-keys"; P_DESCRIPTION="komodo-user 15 AP3A.241105.007 12686056 release-keys"; P_BUILD_ID="AP3A.241105.007"; P_INCREMENTAL="12686056"; P_RELEASE="15"; P_SDK="35"; P_SECURITY_PATCH="2024-11-05"; P_TAGS="release-keys"; P_TYPE="user"; }
-profile_s24ultra() { PROFILE_NAME="Galaxy S24 Ultra"; P_BRAND="samsung"; P_MANUFACTURER="samsung"; P_MODEL="SM-S928B"; P_DEVICE="e3q"; P_PRODUCT="e3qxxx"; P_BOARD="e3q"; P_HARDWARE="qcom"; P_PLATFORM="pineapple"; P_FINGERPRINT="samsung/e3qxxx/e3q:14/UP1A.231005.007/S928BXXU3BXIB:user/release-keys"; P_DESCRIPTION="e3qxxx-user 14 UP1A.231005.007 S928BXXU3BXIB release-keys"; P_BUILD_ID="UP1A.231005.007"; P_INCREMENTAL="S928BXXU3BXIB"; P_RELEASE="14"; P_SDK="34"; P_SECURITY_PATCH="2024-09-01"; P_TAGS="release-keys"; P_TYPE="user"; }
-profile_xiaomi14() { PROFILE_NAME="Xiaomi 14"; P_BRAND="Xiaomi"; P_MANUFACTURER="Xiaomi"; P_MODEL="23127PN0CG"; P_DEVICE="houji"; P_PRODUCT="houji"; P_BOARD="houji"; P_HARDWARE="qcom"; P_PLATFORM="pineapple"; P_FINGERPRINT="Xiaomi/houji/houji:14/UKQ1.231003.002/V816.0.4.0.UNCMIXM:user/release-keys"; P_DESCRIPTION="houji-user 14 UKQ1.231003.002 V816.0.4.0.UNCMIXM release-keys"; P_BUILD_ID="UKQ1.231003.002"; P_INCREMENTAL="V816.0.4.0.UNCMIXM"; P_RELEASE="14"; P_SDK="34"; P_SECURITY_PATCH="2024-07-01"; P_TAGS="release-keys"; P_TYPE="user"; }
-profile_oneplus12() { PROFILE_NAME="OnePlus 12"; P_BRAND="OnePlus"; P_MANUFACTURER="OnePlus"; P_MODEL="CPH2583"; P_DEVICE="OP595DL1"; P_PRODUCT="CPH2583EEA"; P_BOARD="kalama"; P_HARDWARE="qcom"; P_PLATFORM="kalama"; P_FINGERPRINT="OnePlus/CPH2583EEA/OP595DL1:14/UP1A.231005.007/U.5e7ab59_3_4f9e0d0:user/release-keys"; P_DESCRIPTION="OP595DL1-user 14 UP1A.231005.007 release-keys"; P_BUILD_ID="UP1A.231005.007"; P_INCREMENTAL="U.5e7ab59_3_4f9e0d0"; P_RELEASE="14"; P_SDK="34"; P_SECURITY_PATCH="2024-08-01"; P_TAGS="release-keys"; P_TYPE="user"; }
-profile_pixel8pro() { PROFILE_NAME="Pixel 8 Pro"; P_BRAND="google"; P_MANUFACTURER="Google"; P_MODEL="Pixel 8 Pro"; P_DEVICE="husky"; P_PRODUCT="husky"; P_BOARD="husky"; P_HARDWARE="husky"; P_PLATFORM="zuma"; P_FINGERPRINT="google/husky/husky:14/AP2A.240805.005/12025142:user/release-keys"; P_DESCRIPTION="husky-user 14 AP2A.240805.005 12025142 release-keys"; P_BUILD_ID="AP2A.240805.005"; P_INCREMENTAL="12025142"; P_RELEASE="14"; P_SDK="34"; P_SECURITY_PATCH="2024-08-05"; P_TAGS="release-keys"; P_TYPE="user"; }
+# === Device profile pool (v4.13: +BOOTLOADER/HOST/USER/CODENAME/INITIAL_SDK) ===
+profile_pixel9pro() { PROFILE_NAME="Pixel 9 Pro XL"; P_BRAND="google"; P_MANUFACTURER="Google"; P_MODEL="Pixel 9 Pro XL"; P_DEVICE="komodo"; P_PRODUCT="komodo"; P_BOARD="komodo"; P_HARDWARE="komodo"; P_PLATFORM="zuma_pro"; P_FINGERPRINT="google/komodo/komodo:15/AP3A.241105.007/12686056:user/release-keys"; P_DESCRIPTION="komodo-user 15 AP3A.241105.007 12686056 release-keys"; P_BUILD_ID="AP3A.241105.007"; P_INCREMENTAL="12686056"; P_RELEASE="15"; P_SDK="35"; P_INITIAL_SDK="33"; P_SECURITY_PATCH="2024-11-05"; P_TAGS="release-keys"; P_TYPE="user"; P_BOOTLOADER="komodo-1.0-12345678"; P_HOST="abfarm-release"; P_USER="android-build"; P_CODENAME="REL"; }
+profile_s24ultra()  { PROFILE_NAME="Galaxy S24 Ultra"; P_BRAND="samsung"; P_MANUFACTURER="samsung"; P_MODEL="SM-S928B"; P_DEVICE="e3q"; P_PRODUCT="e3qxxx"; P_BOARD="e3q"; P_HARDWARE="qcom"; P_PLATFORM="pineapple"; P_FINGERPRINT="samsung/e3qxxx/e3q:14/UP1A.231005.007/S928BXXU3BXIB:user/release-keys"; P_DESCRIPTION="e3qxxx-user 14 UP1A.231005.007 S928BXXU3BXIB release-keys"; P_BUILD_ID="UP1A.231005.007"; P_INCREMENTAL="S928BXXU3BXIB"; P_RELEASE="14"; P_SDK="34"; P_INITIAL_SDK="33"; P_SECURITY_PATCH="2024-09-01"; P_TAGS="release-keys"; P_TYPE="user"; P_BOOTLOADER="S928BXXU3BXIB"; P_HOST="21DKC518"; P_USER="dpi"; P_CODENAME="REL"; }
+profile_xiaomi14()  { PROFILE_NAME="Xiaomi 14"; P_BRAND="Xiaomi"; P_MANUFACTURER="Xiaomi"; P_MODEL="23127PN0CG"; P_DEVICE="houji"; P_PRODUCT="houji"; P_BOARD="houji"; P_HARDWARE="qcom"; P_PLATFORM="pineapple"; P_FINGERPRINT="Xiaomi/houji/houji:14/UKQ1.231003.002/V816.0.4.0.UNCMIXM:user/release-keys"; P_DESCRIPTION="houji-user 14 UKQ1.231003.002 V816.0.4.0.UNCMIXM release-keys"; P_BUILD_ID="UKQ1.231003.002"; P_INCREMENTAL="V816.0.4.0.UNCMIXM"; P_RELEASE="14"; P_SDK="34"; P_INITIAL_SDK="33"; P_SECURITY_PATCH="2024-07-01"; P_TAGS="release-keys"; P_TYPE="user"; P_BOOTLOADER="unknown"; P_HOST="pangu-build"; P_USER="builder"; P_CODENAME="REL"; }
+profile_oneplus12() { PROFILE_NAME="OnePlus 12"; P_BRAND="OnePlus"; P_MANUFACTURER="OnePlus"; P_MODEL="CPH2583"; P_DEVICE="OP595DL1"; P_PRODUCT="CPH2583EEA"; P_BOARD="kalama"; P_HARDWARE="qcom"; P_PLATFORM="kalama"; P_FINGERPRINT="OnePlus/CPH2583EEA/OP595DL1:14/UP1A.231005.007/U.5e7ab59_3_4f9e0d0:user/release-keys"; P_DESCRIPTION="OP595DL1-user 14 UP1A.231005.007 release-keys"; P_BUILD_ID="UP1A.231005.007"; P_INCREMENTAL="U.5e7ab59_3_4f9e0d0"; P_RELEASE="14"; P_SDK="34"; P_INITIAL_SDK="33"; P_SECURITY_PATCH="2024-08-01"; P_TAGS="release-keys"; P_TYPE="user"; P_BOOTLOADER="unknown"; P_HOST="ubuntu"; P_USER="jenkins"; P_CODENAME="REL"; }
+profile_pixel8pro() { PROFILE_NAME="Pixel 8 Pro"; P_BRAND="google"; P_MANUFACTURER="Google"; P_MODEL="Pixel 8 Pro"; P_DEVICE="husky"; P_PRODUCT="husky"; P_BOARD="husky"; P_HARDWARE="husky"; P_PLATFORM="zuma"; P_FINGERPRINT="google/husky/husky:14/AP2A.240805.005/12025142:user/release-keys"; P_DESCRIPTION="husky-user 14 AP2A.240805.005 12025142 release-keys"; P_BUILD_ID="AP2A.240805.005"; P_INCREMENTAL="12025142"; P_RELEASE="14"; P_SDK="34"; P_INITIAL_SDK="33"; P_SECURITY_PATCH="2024-08-05"; P_TAGS="release-keys"; P_TYPE="user"; P_BOOTLOADER="husky-1.2-12025142"; P_HOST="abfarm-release"; P_USER="android-build"; P_CODENAME="REL"; }
 
 PROFILES_LIST="pixel9pro s24ultra xiaomi14 oneplus12 pixel8pro"
 pick_random_profile() {
@@ -210,6 +201,48 @@ load_profile() {
     esac
 }
 
+# ============================================================
+# NEW v4.13: write_spoof_prop — SELALU dipanggil (PIF-aware).
+# Tulis 21 key lengkap yang di-consume main.cpp.
+# ============================================================
+write_spoof_prop() {
+    [ -z "$P_MODEL" ] && { log_warn "write_spoof_prop: profil belum di-load"; return 1; }
+    _BL="${P_BOOTLOADER:-unknown}"
+    _HOST="${P_HOST:-abfarm-release}"
+    _USER="${P_USER:-android-build}"
+    _CODENAME="${P_CODENAME:-REL}"
+    _INITSDK="${P_INITIAL_SDK:-$P_SDK}"
+    _TIME_MS="$(date +%s)000"
+
+    rm -f "$MODDIR/spoof.prop"
+    cat > "$MODDIR/spoof.prop" <<EOF
+# Auto-generated ternak v${VERSION} — ${PROFILE_NAME} | $(date '+%Y-%m-%d %H:%M:%S')
+BRAND=$P_BRAND
+MANUFACTURER=$P_MANUFACTURER
+MODEL=$P_MODEL
+DEVICE=$P_DEVICE
+PRODUCT=$P_PRODUCT
+BOARD=$P_BOARD
+HARDWARE=$P_HARDWARE
+FINGERPRINT=$P_FINGERPRINT
+ID=$P_BUILD_ID
+BOOTLOADER=$_BL
+HOST=$_HOST
+USER=$_USER
+TYPE=$P_TYPE
+TAGS=$P_TAGS
+TIME=$_TIME_MS
+INCREMENTAL=$P_INCREMENTAL
+RELEASE=$P_RELEASE
+SDK_INT=$P_SDK
+DEVICE_INITIAL_SDK_INT=$_INITSDK
+SECURITY_PATCH=$P_SECURITY_PATCH
+CODENAME=$_CODENAME
+EOF
+    chmod 644 "$MODDIR/spoof.prop"
+    log_ok "spoof.prop written (${PROFILE_NAME}, 21 keys)"
+}
+
 apply_profile() {
     pname="$1"
     [ -z "$pname" ] && pname=$(pick_random_profile)
@@ -218,7 +251,6 @@ apply_profile() {
 
     if echo "$P_BRAND" | grep -qi samsung; then serial=$(generate_serial_samsung); else serial=$(generate_serial_generic); fi
 
-    # --- Live apply via resetprop-rs (display + fingerprint) — 1 proses via -f + rekonsiliasi ---
     rp_bulk <<EOF
 ro.product.brand $P_BRAND
 ro.product.manufacturer $P_MANUFACTURER
@@ -246,19 +278,10 @@ ro.bootimage.build.fingerprint $P_FINGERPRINT
 ro.system.build.fingerprint $P_FINGERPRINT
 ro.product.build.fingerprint $P_FINGERPRINT
 EOF
-    rp ro.serialno "$serial"   # runtime-only, hilang saat reboot
+    rp ro.serialno "$serial"
 
-    # CATATAN: ro.boot.* / verifiedbootstate / vbmeta / flash.locked /
-    # ro.debuggable / ro.secure TIDAK di-set di sini. Itu urusan PlayIntegrityFix.
-    # Menulisnya = mismatch Keymint/attestation = akar bootloop v4.7.
-
-    # post-fs-data.sh TIDAK di-generate di sini lagi.
-    # Dipakai file STATIS yang di-bundle (baca system.prop + re-seal tiap boot);
-    # lihat section "post-fs-data.sh (standalone)". apply_profile cukup tulis system.prop.
-
-    # system.prop (SAFE display subset) — selalu ditulis
     cat > "$SYSPROP_FILE" <<EOF
-# Auto-generated ternak v4.10 (SAFE display subset) — $PROFILE_NAME ($pname) | $(date '+%Y-%m-%d %H:%M:%S')
+# Auto-generated ternak v${VERSION} — $PROFILE_NAME ($pname) | $(date '+%Y-%m-%d %H:%M:%S')
 ro.product.brand=$P_BRAND
 ro.product.manufacturer=$P_MANUFACTURER
 ro.product.model=$P_MODEL
@@ -294,34 +317,13 @@ EOF
     log_info "Fingerprint: $P_FINGERPRINT"
     log_info "Serial: $serial"
 
-    # Tulis spoof.prop utk Zygisk companion — bentuk KEY=VALUE (compat pif.prop)
-    rm -f "$MODDIR/spoof.prop"
-    cat > "$MODDIR/spoof.prop" <<EOF
-BRAND=$P_BRAND
-MANUFACTURER=$P_MANUFACTURER
-MODEL=$P_MODEL
-DEVICE=$P_DEVICE
-PRODUCT=$P_PRODUCT
-BOARD=$P_BOARD
-HARDWARE=$P_HARDWARE
-FINGERPRINT=$P_FINGERPRINT
-ID=$P_BUILD_ID
-INCREMENTAL=$P_INCREMENTAL
-RELEASE=$P_RELEASE
-SDK_INT=$P_SDK
-SECURITY_PATCH=$P_SECURITY_PATCH
-TAGS=$P_TAGS
-TYPE=$P_TYPE
-EOF
-    chmod 644 "$MODDIR/spoof.prop"
-    log_ok "spoof.prop written for Zygisk companion"
+    # NEW v4.13: write spoof.prop (21 keys)
+    write_spoof_prop
 }
 
 # === Identifier setters ===
 set_android_id_global() { newid="$1"; [ -z "$newid" ] && newid=$(generate_hex 16); settings_put secure android_id "$newid"; log_ok "Global ANDROID_ID: $newid"; }
 
-# wipe_ssaid: FIX — backup + surgical, tidak andalkan force-stop app Settings.
-# SSAID dipegang system_server (SettingsProvider), jadi WAJIB reboot utk regen bersih.
 wipe_ssaid() {
     log_step "Wipe SSAID (backup + surgical)..."
     se_permissive
@@ -337,7 +339,7 @@ wipe_ssaid() {
     if [ "$changed" = "1" ]; then
         REBOOT_NEEDED=1
         log_ok "SSAID dihapus (backup di $BACKUP_DIR_ROOT)."
-        log_warn "WAJIB reboot: system_server regen SSAID bersih saat boot (jangan andalkan force-stop)."
+        log_warn "WAJIB reboot: system_server regen SSAID bersih saat boot."
     else
         log_info "Tidak ada settings_ssaid.xml."
     fi
@@ -346,7 +348,6 @@ wipe_ssaid() {
 set_gaid_value() {
     newgaid="$1"; [ -z "$newgaid" ] && newgaid=$(generate_uuid)
     log_step "Set GAID: $newgaid"
-    # v4.12: sync ke Settings.Global juga (biar verify_changes & app lawas baca value baru)
     settings_put global advertising_id "$newgaid"
     settings_put global limit_ad_tracking 0
     force_stop com.google.android.gms; am kill com.google.android.gms 2>/dev/null; sleep 1
@@ -371,13 +372,12 @@ EOF
     log_ok "GAID set: $newgaid"
 }
 
-# randomize_wlan_mac: FIX — backup WifiConfigStore sebelum hapus (cegah kehilangan wifi diam-diam)
 randomize_wlan_mac() {
     newmac="$1"; [ -z "$newmac" ] && newmac=$(generate_mac)
     log_step "Randomize wlan0 MAC: $newmac"
     se_permissive
     ip link set wlan0 down 2>/dev/null; sleep 1
-    ip link set dev wlan0 address "$newmac" 2>/dev/null && log_ok "MAC: $newmac" || log_warn "MAC ditolak driver (Android 10+ pakai per-SSID MAC)"
+    ip link set dev wlan0 address "$newmac" 2>/dev/null && log_ok "MAC: $newmac" || log_warn "MAC ditolak driver"
     ip link set wlan0 up 2>/dev/null
     WCS=/data/misc/apexdata/com.android.wifi/WifiConfigStore.xml
     if [ -f "$WCS" ]; then
@@ -401,6 +401,7 @@ randomize_device_name() {
     log_info "New BT name: $NEW_NAME"
     settings_put global bluetooth_name "$NEW_NAME"
     settings_put global device_name "$NEW_NAME"
+    settings_put system device_name "$NEW_NAME"
     rp_set persist.bluetooth.adaptername "$NEW_NAME"
     se_permissive
     updated=0
@@ -448,7 +449,7 @@ detect_modules() {
     [ -d /data/adb/modules/specter ] && HAS_SPECTER=1
     { [ -d /data/adb/modules/zygisksu ] || [ -d /data/adb/modules/zygisknext ]; } && HAS_ZYGISK_NEXT=1
     SDK=$(getprop ro.build.version.sdk 2>/dev/null)
-    log_info "SDK=$SDK PIF=$HAS_PIF Specter=$HAS_SPECTER ZygiskNext=$HAS_ZYGISK_NEXT RP=$([ -n \"$RP\" ] && echo yes || echo no)"
+    log_info "SDK=$SDK PIF=$HAS_PIF Specter=$HAS_SPECTER ZygiskNext=$HAS_ZYGISK_NEXT RP=$([ -n "$RP" ] && echo yes || echo no)"
 }
 check_root() { [ "$(id -u)" -eq 0 ] || { log_err "Need root"; exit 1; }; }
 preflight() {
@@ -456,7 +457,7 @@ preflight() {
     detect_resetprop || { log_err "resetprop-rs WAJIB. Bundle bin/resetprop-rs di module. Abort."; exit 1; }
     detect_root_manager
     detect_modules
-    [ $HAS_PIF -eq 1 ] && log_warn "PIF aktif — apply_profile akan SKIP (PIF handle Build.*)"
+    [ $HAS_PIF -eq 1 ] && log_warn "PIF aktif — apply_profile native SKIP tapi spoof.prop TETAP ditulis utk Zygisk"
     [ $HAS_SPECTER -eq 0 ] && log_warn "Specter tidak terinstall — root bisa terdeteksi"
 }
 
@@ -477,34 +478,16 @@ backup_state() {
 
 # === App ops + wipes ===
 freeze_targets() { log_step "Force-stop targets + GMS/GSF..."; for pkg in $FID_TARGETS; do force_stop "$pkg"; done; sleep 2; log_ok "Frozen"; }
-# ============================================================
-# v4.12: deep_clear + verify_clear
-# pm clear polos cuma wipe /data/data/<pkg>. OAuth token / Google account
-# grant tetap tercache di GMS AccountManager + GMS shared_prefs, akibatnya
-# app "silent re-login" habis fresh ("login masih nyantol"). deep_clear
-# tuntas-in itu.
-# ============================================================
 deep_clear() {
     pkg="$1"
     log_step "Deep-clear: $pkg"
-
-    # 0. Cache UID sebelum pm clear (data dir bakal hilang setelah clear)
     pkg_uid=$(pm list packages -U 2>/dev/null | grep "^package:$pkg " | sed 's/.*uid://' | head -n1)
     [ -z "$pkg_uid" ] && pkg_uid=$(stat -c '%u' "/data/data/$pkg" 2>/dev/null)
-
-    # 1. Force-stop + kill semua proses child (biar clear tidak race)
-    force_stop "$pkg"
-    pkill -9 -f "$pkg" 2>/dev/null
-    sleep 1
-
-    # 2. Standard pm clear per-user
+    force_stop "$pkg"; pkill -9 -f "$pkg" 2>/dev/null; sleep 1
     for u in $(get_users); do
         r=$(pm clear --user "$u" "$pkg" 2>&1)
-        [ "$r" = "Success" ] && log_ok "pm clear: $pkg (user $u)" \
-                             || log_warn "pm clear FAIL: $pkg -> $r"
+        [ "$r" = "Success" ] && log_ok "pm clear: $pkg (user $u)" || log_warn "pm clear FAIL: $pkg -> $r"
     done
-
-    # 3. Manual wipe kalau pm clear leave residue
     se_permissive
     for u in $(get_users); do
         rm -rf "/data/user/$u/$pkg"                2>/dev/null
@@ -513,34 +496,21 @@ deep_clear() {
         rm -rf "/data/media/$u/Android/media/$pkg" 2>/dev/null
         rm -rf "/data/media/$u/Android/obb/$pkg"   2>/dev/null
     done
-
-    # 4. Google Backup Service: wipe cloud backup utk pkg + trigger empty backup
-    #    (cegah Google Drive restore session xml pas app di-buka lagi)
     bmgr wipe   "$pkg" >/dev/null 2>&1
     bmgr backup "$pkg" >/dev/null 2>&1
-
-    # 5. Revoke authtokens & grants di GMS AccountManager utk pkg ini.
-    #    NOTE: DELETE token/grants only — BUKAN akun-nya (biar Google Sign-In di app lain tetap jalan).
     for u in $(get_users); do
         db="/data/system_ce/$u/accounts_ce.db"
         [ -f "$db" ] || continue
         sqlite3 "$db" "DELETE FROM authtokens WHERE type LIKE '%$pkg%';" 2>/dev/null
         [ -n "$pkg_uid" ] && sqlite3 "$db" "DELETE FROM grants WHERE uid = $pkg_uid;" 2>/dev/null
     done
-
-    # 6. Wipe GMS shared_prefs yg cache OAuth token utk pkg ini
     rm -f /data/data/com.google.android.gms/shared_prefs/oauth_*"$pkg"*.xml       2>/dev/null
     rm -f /data/data/com.google.android.gms/shared_prefs/googlesignin*"$pkg"*.xml 2>/dev/null
     rm -f /data/data/com.google.android.gms/shared_prefs/AppAuth*"$pkg"*.xml      2>/dev/null
     se_restore
-
-    # 7. Verify — kalau masih ada residue, kasih warning
     verify_clear "$pkg" quiet
     log_ok "deep-clear done: $pkg"
 }
-
-# verify_clear <pkg> [quiet] — cek residue di /data/user/<u>/<pkg>.
-# Return 0 kalau bersih, 1 kalau ada residue.
 verify_clear() {
     pkg="$1"; mode="$2"
     residue=0
@@ -563,7 +533,6 @@ verify_clear() {
     fi
     return 1
 }
-
 clear_target_apps() {
     log_step "Deep-clear targets..."
     for pkg in $TARGET_APPS; do
@@ -573,13 +542,12 @@ clear_target_apps() {
             log_warn "$pkg not installed"
         fi
     done
-    # Restart GMS setelah semua target di-clear → invalidate OAuth cache in-memory
     force_stop com.google.android.gms
     force_stop com.google.android.gsf
     am kill    com.google.android.gms 2>/dev/null
     am kill    com.google.android.gsf 2>/dev/null
     sleep 2
-    log_ok "GMS restarted post-clear (in-memory auth cache invalidated)"
+    log_ok "GMS restarted post-clear"
 }
 clear_sdcard_residue() { log_step "Wipe SDcard residue..."; se_permissive; for pkg in $TARGET_APPS; do rm -rf "/sdcard/Android/data/$pkg" "/sdcard/Android/media/$pkg" "/sdcard/Android/obb/$pkg" 2>/dev/null; done; se_restore; log_ok "SDcard cleared"; }
 wipe_firebase_iid() {
@@ -609,8 +577,6 @@ clear_network_caches() {
     rm -f /data/misc/dhcp/*.lease /data/misc/dhcp-6.8/*.lease 2>/dev/null
     rm -rf /data/misc/netstats/* /data/system/netstats/* 2>/dev/null
     se_restore
-    # A15: 'ndc resolver clearnetdns' sudah tidak dikenal (netd balas '500 0 Command not recognized' ke stdout).
-    # Enumerasi netId aktif -> flushnet per-network, dengan redirect penuh.
     for _nid in $(cmd connectivity networks 2>/dev/null | awk '/netId/{print $2}' | tr -d ','); do
         ndc resolver flushnet "$_nid" >/dev/null 2>&1
     done
@@ -625,7 +591,6 @@ wipe_forensic_traces() {
 }
 wipe_clipboard() { cmd clipboard set-text "" 2>/dev/null; log_ok "Clipboard cleared"; }
 
-# === Persona snapshot ===
 save_persona_snapshot() {
     pkg="$1"; f="$PERSONA_DIR/${pkg}.json"
     aid=$(settings_get secure android_id); [ -z "$aid" ] && aid=$(generate_hex 16)
@@ -634,10 +599,7 @@ save_persona_snapshot() {
     if [ -f "$PROFILE_FILE" ]; then
         pname=$(cut -d'|' -f2 "$PROFILE_FILE")
     else
-        # Fallback: baca dari PIF pif.prop (key=value, BUKAN JSON)
-        for _pif in /data/adb/modules/playintegrityfix/pif.prop \
-                    /data/adb/pif.prop \
-                    /data/adb/modules/playintegrityfix/custom.pif.prop; do
+        for _pif in /data/adb/modules/playintegrityfix/pif.prop /data/adb/pif.prop /data/adb/modules/playintegrityfix/custom.pif.prop; do
             [ -f "$_pif" ] || continue
             _m=$(grep -E '^MODEL=' "$_pif" | head -n1 | cut -d= -f2- | tr -d '"\r\n')
             _b=$(grep -E '^MANUFACTURER=' "$_pif" | head -n1 | cut -d= -f2- | tr -d '"\r\n')
@@ -671,13 +633,28 @@ burn_persona() {
     log_ok "$pkg ready for new account"
 }
 
-# === FRESH IDENTITY pipeline ===
 do_fresh() {
     preflight
     log_info "=== TERNAK FRESH IDENTITY v$VERSION ==="
     backup_state
-    if [ "$HAS_PIF" -eq 0 ]; then apply_profile "$1"
-    else log_warn "PIF active — apply_profile skip (PIF handle Build.*)"; load_profile "$(pick_random_profile)" >/dev/null 2>&1; fi
+
+    # v4.13: SELALU tulis spoof.prop utk Zygisk, apapun kondisi PIF.
+    if [ "$HAS_PIF" -eq 0 ]; then
+        apply_profile "$1"
+    else
+        log_warn "PIF active — SKIP native prop writing, tapi TETAP tulis spoof.prop utk Zygisk"
+        pname="${1:-$(pick_random_profile)}"
+        load_profile "$pname" >/dev/null 2>&1
+        if echo "$P_BRAND" | grep -qi samsung; then serial=$(generate_serial_samsung); else serial=$(generate_serial_generic); fi
+        rp ro.serialno "$serial"
+        write_spoof_prop
+        echo "$pname|$PROFILE_NAME|$P_FINGERPRINT|$serial|$(date +%s)" > "$PROFILE_FILE"
+        chmod 644 "$PROFILE_FILE"
+        REBOOT_NEEDED=1
+        log_ok "Profile registered (PIF mode): $PROFILE_NAME"
+        log_info "Fingerprint: $P_FINGERPRINT"
+        log_info "Serial: $serial"
+    fi
 
     new_gaid=$(generate_uuid); new_aid=$(generate_hex 16)
     freeze_targets
@@ -695,21 +672,18 @@ do_fresh() {
     rm -f "$PERSONA_DIR"/*.json 2>/dev/null; for pkg in $TARGET_APPS; do save_persona_snapshot "$pkg"; done
     wipe_clipboard
     wipe_forensic_traces
-    # v4.11: skip seal_all kalau PIF aktif (Build.* di-hook di framework level, seal native tidak berguna
-    # dan `no active profile to seal` cuma nambah noise di log karena apply_profile ikut di-skip).
     if [ "$HAS_PIF" = "1" ]; then
-        log_info "PIF active — skip seal_all (Build.* handled by PIF di framework level)"
+        log_info "PIF active — skip seal_all (native prop handled by PIF)"
     else
         seal_all
     fi
-    [ -n "$RP" ] && "$RP" --compact 2>/dev/null && log_ok "Property arenas compacted (buang gap forensik)"
+    [ -n "$RP" ] && "$RP" --compact 2>/dev/null && log_ok "Property arenas compacted"
 
     echo ""; verify_changes; echo ""
     log_ok "FRESH IDENTITY READY"
     [ "$REBOOT_NEEDED" = "1" ] && log_warn "WAJIB REBOOT: SSAID/Build.* baru propagate penuh setelah reboot."
 }
 
-# === Info / verify ===
 get_info() {
     android_id=$(settings_get secure android_id); bt_name=$(settings_get global bluetooth_name)
     hostname=$(getprop net.hostname | tr -d '"\r\n\t'); gaid=$(settings_get global advertising_id)
@@ -742,11 +716,11 @@ verify_changes() {
     echo "GAID        : $(settings_get global advertising_id)"
     echo "BT Name     : $(settings_get global bluetooth_name)"
     echo "Hostname    : $(getprop net.hostname)"
+    echo "spoof.prop  : $([ -f "$MODDIR/spoof.prop" ] && wc -l < "$MODDIR/spoof.prop" | tr -d ' ' || echo 0) keys"
     echo "resetprop-rs: ${RP:-none} (stealth=$RP_STEALTH_OK)"
     echo "============================================="
 }
 
-# === Router ===
 case "$1" in
     info)        detect_resetprop >/dev/null 2>&1; detect_root_manager >/dev/null 2>&1; detect_modules >/dev/null 2>&1; get_info ;;
     fresh|full)  do_fresh "$2" ;;
@@ -769,12 +743,13 @@ case "$1" in
     unseal)      preflight; [ -z "$2" ] && { log_err "Usage: $0 unseal <prop>"; exit 1; }; "$RP" --unseal "$2" 2>/dev/null || "$RP" --unseal-arena "$2" 2>/dev/null; log_ok "Unsealed: $2" ;;
     compact)     detect_resetprop >/dev/null 2>&1; [ -n "$RP" ] && "$RP" --compact && log_ok "Compacted" || log_err "resetprop-rs tidak ada" ;;
     diag)        [ -f "$MODDIR/bootloop_diag.sh" ] && sh "$MODDIR/bootloop_diag.sh" || log_err "bootloop_diag.sh tidak ditemukan" ;;
+    write_spoof) preflight; pname="${2:-$(pick_random_profile)}"; load_profile "$pname" >/dev/null 2>&1 && write_spoof_prop || log_err "Gagal load profil $pname" ;;
     unfresh)
         check_root
         rm -f "$SYSPROP_FILE" 2>/dev/null && log_ok "system.prop removed"
-        # post-fs-data.sh STATIS dibiarkan — otomatis no-op tanpa system.prop.
         rm -f "$PROFILE_FILE" 2>/dev/null && log_ok "profile cleared"
         rm -f "$PERSONA_DIR"/*.json 2>/dev/null && log_ok "personas wiped"
+        rm -f "$MODDIR/spoof.prop" 2>/dev/null && log_ok "spoof.prop removed"
         log_warn "Reboot untuk balik ke build asli." ;;
     reboot)      sync && reboot ;;
     *)
@@ -785,6 +760,7 @@ Usage: $0 <command> [args]
 Main:
   fresh [profile]   FRESH identity: profile + AID + GAID + MAC + clear
   profile <name>    pixel9pro|s24ultra|xiaomi14|oneplus12|pixel8pro
+  write_spoof [pf]  hanya tulis spoof.prop utk Zygisk (tanpa apply native)
   profiles | pick | unfresh | diag
 Targeted:
   burn <pkg> | burn_all | aid [hex16] | gaid [uuid] | mac [aa:..:ff]
