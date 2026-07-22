@@ -1,0 +1,7 @@
+id=ternak_device_changer
+name=Ternak Device Changer (shell + Zygisk)
+version=v4.12+z1.0.0
+versionCode=41200
+author=diru768
+description=Shell-level identity forge script merged with a Zygisk C++ companion that hooks android.os.Build fields per-target-app.
+updateJson=

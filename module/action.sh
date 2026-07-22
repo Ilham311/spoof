@@ -46,7 +46,7 @@ echo "   Sementara itu, menjalankan Quick Action..."
 echo "================================================"
 echo ""
 
-sh "$MODDIR/ternak_core.sh" full
+sh "$MODDIR/ternak_core_v4.sh" full
 
 echo ""
 echo "[✓] Selesai!"
