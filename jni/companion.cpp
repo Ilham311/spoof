@@ -258,6 +258,8 @@ static Identity generate_identity(bool keep_id) {
 // ============================================================
 // Apply native prop + settings + kill gms/vending
 // ============================================================
+static std::set<std::string> load_targets();
+
 static void apply_native(const Identity& id) {
     auto get = [&](const std::string& k) -> std::string {
         auto it = id.kv.find(k);
@@ -299,11 +301,12 @@ static void apply_native(const Identity& id) {
                 {"settings", "put", "secure", "android_id", aid.c_str()});
     }
 
-    // am force-stop and pm clear for all targets in hook_targets.txt
+    // am force-stop for all targets in hook_targets.txt so they pick up
+    // the new spoofed identity on next launch (pm clear is too destructive
+    // here since it wipes app data/login state on every regenerate).
     std::set<std::string> targets = load_targets();
     for (const std::string& pkg : targets) {
         run_bin("/system/bin/am", {"am", "force-stop", pkg.c_str()});
-        run_bin("/system/bin/pm", {"pm", "clear", pkg.c_str()});
     }
 }
 
