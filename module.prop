@@ -1,7 +1,7 @@
-id=ternak_device_changer
-name=Ternak Device ZYGISK 
+id=dynamic_env_module
+name=Dynamic Environment ZYGISK
 version=v1-FIX 
 versionCode=1
 author=Ilham 
-description=Pure-Zygisk device identity spoofer. Fresh identity from embedded Pixel pool. Covers 25 Build.* fields + native ro.serialno / display.id / baseband. No shell core.
+description=Pure-Zygisk device identity emulator. Fresh identity from embedded Pixel pool. Covers 25 Build.* fields + native ro.serialno / display.id / baseband. No shell core.
 updateJson=https://raw.githubusercontent.com/diru768/ternak-device-changer/main/update.json

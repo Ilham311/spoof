@@ -8,7 +8,7 @@
 #include <sstream>
 #include <cstdlib>
 #include "zygisk.hpp"
-#define LOG_TAG "TernakZygisk"
+#define LOG_TAG "EnvZygisk"
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, __VA_ARGS__)
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO,  LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
@@ -178,7 +178,7 @@ static void apply_build_hooks(JNIEnv* env) {
         env->DeleteLocalRef(ver);
     } else env->ExceptionClear();
 }
-class TernakModule : public zygisk::ModuleBase {
+class EnvModule : public zygisk::ModuleBase {
 public:
     void onLoad(Api* api, JNIEnv* env) override {
         api_ = api;
@@ -255,6 +255,6 @@ private:
         }
     }
 };
-REGISTER_ZYGISK_MODULE(TernakModule)
-extern "C" __attribute__((visibility("default"))) void ternak_companion_entry(int client);
-REGISTER_ZYGISK_COMPANION(ternak_companion_entry)
+REGISTER_ZYGISK_MODULE(EnvModule)
+extern "C" __attribute__((visibility("default"))) void env_companion_entry(int client);
+REGISTER_ZYGISK_COMPANION(env_companion_entry)

@@ -1,6 +1,6 @@
-# Ternak Device Changer (Pure Zygisk)
+# Dynamic Environment Device Changer (Pure Zygisk)
 
-[![build](https://github.com/Ilham311/spoof/actions/workflows/build.yml/badge.svg)](https://github.com/Ilham311/spoof/actions/workflows/build.yml)
+[![build](https://github.com/Ilham311/emulate/actions/workflows/build.yml/badge.svg)](https://github.com/Ilham311/emulate/actions/workflows/build.yml)
 
 ## Overview
 Modul Magisk/KernelSU v5.0+ pure Zygisk untuk mengubah identitas device secara dinamis. Modul ini telah direwrite sepenuhnya dalam C++ dan menggunakan companion process untuk generate identity. Shell scripts sekarang minimal dan hanya memicu native CLI.
@@ -9,11 +9,11 @@ Modul Magisk/KernelSU v5.0+ pure Zygisk untuk mengubah identitas device secara d
 - **Pure-Zygisk Architecture:** Companion process di-spawn di root oleh Zygisk framework, handle atomic write dan UDS listener.
 - **Embedded Pixel Pool:** Mendukung pool device Google Pixel tanpa memerlukan konfigurasi shell yang rumit.
 - **Intercept Native Props:** Mendukung hook pada `SystemProperties.native_get()` untuk memalsukan read akses native libc (menutupi `ro.serialno`, `display.id`, dan `baseband`).
-- **Hook Java `Build.*` Fields:** Menspoof 25 build property berbeda di JVM/JNI level.
-- **Instant Rotate:** Putar device tanpa restart via CLI `ternakctl`.
+- **Hook Java `Build.*` Fields:** Menemulate 25 build property berbeda di JVM/JNI level.
+- **Instant Rotate:** Putar device tanpa restart via CLI `envctl`.
 
 ## Struktur Repository
-- `jni/`: Source code C++ Zygisk hook (`main.cpp`), Zygisk root companion (`companion.cpp`), dan CLI trigger (`ternakctl.c`).
+- `jni/`: Source code C++ Zygisk hook (`main.cpp`), Zygisk root companion (`companion.cpp`), dan CLI trigger (`envctl.c`).
 - `prebuilt/`: Placeholder untuk external/prebuilt binaries seperti `resetprop-rs`.
 - `module.prop`, `customize.sh`, dkk: File standar installer modul Magisk/KernelSU.
 - `.github/workflows/`: Konfigurasi GitHub Action CI/CD (otomatis kompilasi ke 4 ABI via NDK r27b).
@@ -45,27 +45,27 @@ Untuk dukungan penuh:
 3. CI Actions akan secara otomatis meng-include-nya ke dalam `pkg/bin/resetprop-rs` jika terdeteksi, atau kamu dapat mencobanya lokal.
 
 ## Instalasi dan Penggunaan
-1. Unduh rilis ZIP (`ternak-v5.0.0-pure-zygisk.zip`) dari GitHub Releases.
+1. Unduh rilis ZIP (`env-v5.0.0-pure-zygisk.zip`) dari GitHub Releases.
 2. Copot pemasangan versi sebelumnya (seperti v4.13) dan **Reboot**.
 3. Flash versi `v5.0.0` zip melalui menu Module Magisk/KernelSU dan **Reboot**.
 4. Generate identitas pertama dengan menekan tombol **Action** di KSU Manager, atau jalankan via shell:
    ```bash
-   su -c /data/adb/modules/ternak_device_changer/action.sh
+   su -c /data/adb/modules/dynamic_env_module/action.sh
    ```
 
-### Command `ternakctl`
+### Command `envctl`
 ```bash
 # Cek identitas sekarang
-su -c /data/adb/modules/ternak_device_changer/bin/ternakctl status
+su -c /data/adb/modules/dynamic_env_module/bin/envctl status
 
 # Putar ulang, namun biarkan SERIAL dan ANDROID_ID sama
-su -c /data/adb/modules/ternak_device_changer/bin/ternakctl regenerate --keep-id
+su -c /data/adb/modules/dynamic_env_module/bin/envctl regenerate --keep-id
 
 # Set persistent (FINGERPRINT random, serial/android id freeze)
-su -c /data/adb/modules/ternak_device_changer/bin/ternakctl set-mode persistent
+su -c /data/adb/modules/dynamic_env_module/bin/envctl set-mode persistent
 
 # Lock manual (cegah regenerate)
-su -c /data/adb/modules/ternak_device_changer/bin/ternakctl set-mode locked
+su -c /data/adb/modules/dynamic_env_module/bin/envctl set-mode locked
 ```
 
 ## Kredit

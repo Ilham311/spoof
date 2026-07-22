@@ -5,7 +5,7 @@
 #include <errno.h>
 #include <sys/socket.h>
 #include <sys/un.h>
-#define UDS_NAME "ternak.ctrl"
+#define UDS_NAME "env.ctrl"
 enum {
     CLI_REGENERATE = 10,
     CLI_STATUS     = 11,

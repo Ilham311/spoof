@@ -19,7 +19,7 @@
 #include <cstring>
 #include <cstdio>
 #include <cctype>
-#define LOG_TAG "TernakCompanion"
+#define LOG_TAG "EnvCompanion"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO,  LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 enum : uint8_t {
@@ -35,15 +35,15 @@ enum : uint8_t {
     CLI_ROLLBACK     = 15,
     CLI_KEEP_ID      = 16,
 };
-static const char* MODDIR         = "/data/adb/modules/ternak_device_changer";
-static const char* IDENTITY_FILE  = "/data/adb/modules/ternak_device_changer/identity.prop";
-static const char* IDENTITY_BAK   = "/data/adb/modules/ternak_device_changer/identity.prop.bak";
-static const char* MODE_FILE      = "/data/adb/modules/ternak_device_changer/identity.mode";
-static const char* PERSISTENT_BIN = "/data/adb/modules/ternak_device_changer/persistent_id.bin";
-static const char* HOOK_TARGETS   = "/data/adb/modules/ternak_device_changer/hook_targets.txt";
-static const char* RESETPROP      = "/data/adb/modules/ternak_device_changer/bin/resetprop-rs";
-static const char* POOL_FILE      = "/data/adb/modules/ternak_device_changer/pool.json";
-static const char* UDS_NAME       = "ternak.ctrl";
+static const char* MODDIR         = "/data/adb/modules/dynamic_env_module";
+static const char* IDENTITY_FILE  = "/data/adb/modules/dynamic_env_module/identity.prop";
+static const char* IDENTITY_BAK   = "/data/adb/modules/dynamic_env_module/identity.prop.bak";
+static const char* MODE_FILE      = "/data/adb/modules/dynamic_env_module/identity.mode";
+static const char* PERSISTENT_BIN = "/data/adb/modules/dynamic_env_module/persistent_id.bin";
+static const char* HOOK_TARGETS   = "/data/adb/modules/dynamic_env_module/hook_targets.txt";
+static const char* RESETPROP      = "/data/adb/modules/dynamic_env_module/bin/resetprop-rs";
+static const char* POOL_FILE      = "/data/adb/modules/dynamic_env_module/pool.json";
+static const char* UDS_NAME       = "env.ctrl";
 struct PixelEntry {
     const char* model;
     const char* device;
@@ -328,7 +328,7 @@ static void apply_native(const Identity& id, bool clear_targets = true) {
 static std::string do_regenerate(bool keep_id) {
     std::string mode = trim(read_file(MODE_FILE));
     if (mode == "locked") {
-        return "LOCKED: identity locked. Run `ternakctl set-mode fresh` to unlock.\n";
+        return "LOCKED: identity locked. Run `envctl set-mode fresh` to unlock.\n";
     }
     if (mode == "persistent") keep_id = true;
     std::string old = read_file(IDENTITY_FILE);
@@ -502,7 +502,7 @@ static void start_uds_thread_once() {
         pthread_detach(th);
     }
 }
-extern "C" __attribute__((visibility("default"))) void ternak_companion_entry(int client) {
+extern "C" __attribute__((visibility("default"))) void env_companion_entry(int client) {
     pthread_once(&g_once, start_uds_thread_once);
     while (true) {
         uint8_t cmd = 0;

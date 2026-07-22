@@ -1,7 +1,7 @@
 #!/system/bin/sh
 SKIPUNZIP=0
 
-ui_print "- Ternak Device Changer v5.0"
+ui_print "- Dynamic Environment Device Changer v5.0"
 ui_print "- Pure-Zygisk architecture"
 ui_print ""
 
@@ -29,17 +29,17 @@ fi
 set_perm_recursive $MODPATH 0 0 0755 0644
 set_perm $MODPATH/action.sh              0 0 0755
 set_perm $MODPATH/service.sh             0 0 0755
-set_perm $MODPATH/bin/ternakctl-arm64    0 0 0755
-set_perm $MODPATH/bin/ternakctl-arm      0 0 0755
-set_perm $MODPATH/bin/ternakctl-x86_64   0 0 0755
-set_perm $MODPATH/bin/ternakctl-x86      0 0 0755
+set_perm $MODPATH/bin/envctl-arm64    0 0 0755
+set_perm $MODPATH/bin/envctl-arm      0 0 0755
+set_perm $MODPATH/bin/envctl-x86_64   0 0 0755
+set_perm $MODPATH/bin/envctl-x86      0 0 0755
 set_perm $MODPATH/pool.json              0 0 0644
 
 if [ -f "$MODPATH/bin/resetprop-rs" ]; then
     set_perm $MODPATH/bin/resetprop-rs   0 0 0755
 else
     ui_print "! WARNING: resetprop-rs binary is missing."
-    ui_print "! Native props will NOT be spoofed automatically."
+    ui_print "! Native props will NOT be emulated automatically."
     ui_print "! See README.md on how to manually drop it into prebuilt/ before build."
 fi
 
@@ -48,12 +48,12 @@ for abi_dir in $MODPATH/zygisk/*.so; do
     set_perm "$abi_dir" 0 0 0644
 done
 
-# Symlink ternakctl → ABI-specific binary
+# Symlink envctl → ABI-specific binary
 case "$ABI" in
-    arm64-v8a)   ln -sf ternakctl-arm64  $MODPATH/bin/ternakctl ;;
-    armeabi-v7a) ln -sf ternakctl-arm    $MODPATH/bin/ternakctl ;;
-    x86_64)      ln -sf ternakctl-x86_64 $MODPATH/bin/ternakctl ;;
-    x86)         ln -sf ternakctl-x86    $MODPATH/bin/ternakctl ;;
+    arm64-v8a)   ln -sf envctl-arm64  $MODPATH/bin/envctl ;;
+    armeabi-v7a) ln -sf envctl-arm    $MODPATH/bin/envctl ;;
+    x86_64)      ln -sf envctl-x86_64 $MODPATH/bin/envctl ;;
+    x86)         ln -sf envctl-x86    $MODPATH/bin/envctl ;;
     *)           ui_print "! Unknown ABI: $ABI" ;;
 esac
 
@@ -64,7 +64,7 @@ set_perm $MODPATH/identity.mode 0 0 0644
 # Default hook_targets (kalau belum ada dari upgrade)
 if [ ! -f $MODPATH/hook_targets.txt ]; then
     cat > $MODPATH/hook_targets.txt <<'EOF'
-# Ternak hook targets — satu package per baris, # untuk comment
+# Dynamic Environment hook targets — satu package per baris, # untuk comment
 com.google.android.gms.unstable
 com.android.vending
 com.google.android.gms
@@ -73,7 +73,7 @@ com.liuzh.deviceinfo
 com.cwsl.mydevice
 gr.nikolasspyr.integritycheck
 # --- JANGAN masukin Shopee/Tokopedia/banking di sini ---
-# Mereka anti-fraud tier-1, spoof malah trigger flag.
+# Mereka anti-fraud tier-1, mock malah trigger flag.
 EOF
     set_perm $MODPATH/hook_targets.txt 0 0 0644
 fi

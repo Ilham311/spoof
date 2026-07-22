@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.18)
-project(ternak_zygisk LANGUAGES CXX C)
+project(env_zygisk LANGUAGES CXX C)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -15,20 +15,20 @@ set(CMAKE_EXE_LINKER_FLAGS_RELEASE
     "-Wl,--gc-sections -Wl,--strip-all")
 
 # ============================================================
-# libternak.so — main hook + companion (single .so)
+# libenv.so — main hook + companion (single .so)
 # ============================================================
-add_library(ternak SHARED
+add_library(env SHARED
     main.cpp
     companion.cpp
 )
-target_include_directories(ternak PRIVATE ${CMAKE_SOURCE_DIR})
-target_link_libraries(ternak PRIVATE log)
+target_include_directories(env PRIVATE ${CMAKE_SOURCE_DIR})
+target_link_libraries(env PRIVATE log)
 
 # Zygisk framework expects the .so at /data/adb/modules/<id>/zygisk/<ABI>.so
-# The GitHub Actions job renames libternak.so → <ABI>.so when packaging.
+# The GitHub Actions job renames libenv.so → <ABI>.so when packaging.
 
 # ============================================================
-# ternakctl — CLI trigger binary
+# envctl — CLI trigger binary
 # ============================================================
-add_executable(ternakctl ternakctl.c)
+add_executable(envctl envctl.c)
 # No extra libs needed — pure POSIX socket + libc.

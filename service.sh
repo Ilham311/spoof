@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# Ternak v5.0 — boot-time apply native prop
+# Dynamic Environment v5.0 — boot-time apply native prop
 MODDIR="${0%/*}"
 
 # Wait system fully booted
@@ -9,6 +9,6 @@ done
 sleep 5
 
 # Apply identity.prop tersimpan → native prop
-if [ -f "$MODDIR/identity.prop" ] && [ -x "$MODDIR/bin/ternakctl" ]; then
-    "$MODDIR/bin/ternakctl" apply-boot >> /cache/ternak-boot.log 2>&1
+if [ -f "$MODDIR/identity.prop" ] && [ -x "$MODDIR/bin/envctl" ]; then
+    "$MODDIR/bin/envctl" apply-boot >> /cache/env-boot.log 2>&1
 fi
