@@ -280,3 +280,9 @@ private:
 };
 
 REGISTER_ZYGISK_MODULE(TernakModule)
+
+extern "C" {
+    int __cxa_guard_acquire(long *g) { return !*g; }
+    void __cxa_guard_release(long *g) { *g = 1; }
+    void __cxa_guard_abort(long *) {}
+}
