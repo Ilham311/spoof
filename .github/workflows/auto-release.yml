@@ -19,6 +19,20 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
+      - name: Setup NDK
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r27c
+          local-cache: true
+
+      - name: Install dependencies
+        run: sudo apt-get install -y ninja-build
+
+      - name: Build Zygisk module
+        run: |
+          export NDK_HOME=${ANDROID_NDK_HOME}
+          ./sources/build.sh
+
       - name: Get Version info
         id: get_version
         run: |
@@ -45,8 +59,16 @@ jobs:
 
       - name: Create Zip Archive
         run: |
+          cp -r webroot module/ || true
+          cp -r bin module/ || true
+          cp ternak_core_v4.sh module/ || true
+          cp post-fs-data.sh module/ || true
+          cp action.sh module/ || true
+          cp module.prop module/ || true
           ZIP_NAME="ternak_device_changer_${{ steps.get_version.outputs.VERSION }}.zip"
-          zip -r "$ZIP_NAME" . -x "*.git*" -x "*.github*" -x "*.DS_Store"
+          cd module
+          zip -r "../$ZIP_NAME" .
+          cd ..
           echo "ZIP_NAME=$ZIP_NAME" >> $GITHUB_ENV
 
       - name: Create Release
