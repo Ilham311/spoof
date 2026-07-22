@@ -20,19 +20,19 @@
 #define MAX_PROP_LEN 256
 
 // Basic new/delete for ANDROID_STL=none
-void* operator new(size_t size) {
+inline void* operator new(size_t size) {
     return malloc(size);
 }
-void operator delete(void* ptr) noexcept {
+inline void operator delete(void* ptr) noexcept {
     free(ptr);
 }
-void* operator new[](size_t size) {
+inline void* operator new[](size_t size) {
     return malloc(size);
 }
-void operator delete[](void* ptr) noexcept {
+inline void operator delete[](void* ptr) noexcept {
     free(ptr);
 }
-void operator delete(void* ptr, size_t) noexcept {
+inline void operator delete(void* ptr, size_t) noexcept {
     free(ptr);
 }
 
@@ -56,14 +56,12 @@ public:
 
     void preAppSpecialize(zygisk::AppSpecializeArgs* args) override {
         if (!args || !args->nice_name) {
-            api->setOption(zygisk::Option::DLCLOSE_MODULE_LIBRARY);
             return;
         }
 
         const char* process_name_cstr = env->GetStringUTFChars(args->nice_name, nullptr);
         if (!process_name_cstr) {
             clearException(env);
-            api->setOption(zygisk::Option::DLCLOSE_MODULE_LIBRARY);
             return;
         }
 
@@ -134,14 +132,12 @@ public:
         }
 
         if (!is_target) {
-            api->setOption(zygisk::Option::DLCLOSE_MODULE_LIBRARY);
             return;
         }
 
         if (!loadSpoofProps(SPOOF_FILE)) {
             if (!loadSpoofProps(PIF_FILE)) {
                 LOGW("Target %s matched but no spoof source available, skipping hook", process_name);
-                api->setOption(zygisk::Option::DLCLOSE_MODULE_LIBRARY);
                 return;
             }
         }
@@ -153,7 +149,7 @@ public:
     }
 
     void preServerSpecialize(zygisk::ServerSpecializeArgs* args) override {
-        api->setOption(zygisk::Option::DLCLOSE_MODULE_LIBRARY);
+        // Do nothing in system server
     }
 
 private:
