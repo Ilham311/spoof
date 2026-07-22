@@ -36,6 +36,11 @@ jobs:
 
       - name: Pack module
         run: |
+          cp -r webroot module/ || true
+          cp -r bin module/ || true
+          cp ternak_core_v4.sh module/ || true
+          cp post-fs-data.sh module/ || true
+          cp action.sh module/ || true
           cd module
           zip -r ../ternak_device_changer-${{ github.sha }}.zip .
 
