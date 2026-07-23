@@ -1,6 +1,7 @@
 #!/system/bin/sh
-# Dynamic Environment v5.0 — action trigger
-# Semua logic ada di companion.cpp; shell cuma exec CLI trigger.
+# Dynamic Environment v5.1 — action trigger
+# Tap Action → generate FRESH identity (rotate device + rotate SERIAL/ANDROID_ID/GAID/GSF_ID)
+# Kalau mau rotate device TAPI keep identity id, jalankan manual:
+#   su -c /data/adb/modules/dynamic_env_module/bin/envctl regenerate --keep-id
 MODDIR="${0%/*}"
-"$MODDIR/bin/envctl" regenerate --keep-id
-reboot
+exec "$MODDIR/bin/envctl" regenerate

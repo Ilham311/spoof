@@ -1,7 +1,7 @@
 id=dynamic_env_module
 name=Dynamic Environment ZYGISK
-version=v1-FIX-release 
-versionCode=1
-author=Ilham 
-description=Pure-Zygisk device identity emulator. Fresh identity from embedded Pixel pool. Covers 25 Build.* fields + native ro.serialno / display.id / baseband. No shell core.
-updateJson=https://raw.githubusercontent.com/diru768/ternak-device-changer/main/update.json
+version=v5.1.0-production-fix
+versionCode=510
+author=Ilham (diru768)
+description=Pure-Zygisk device identity emulator. Fresh identity from embedded Pixel pool + optional pool.json override. Covers 25 Build.* fields + native ro.serialno / display.id / baseband. Includes GAID/GSF_ID rotation and hook_targets hot-reload.
+updateJson=https://raw.githubusercontent.com/Ilham311/emulate/main/update.json
