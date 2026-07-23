@@ -321,11 +321,11 @@ static Identity generate_identity(bool keep_id) {
         }
         // [P1 FIX] FINGERPRINT fallback uses real BRAND (not hardcoded "google/")
         if (id.kv.find("FINGERPRINT") == id.kv.end()) {
-            std::string brand_lc = to_lower(id.kv.count("BRAND") ? id.kv["BRAND"] : "unknown");
+            std::string brand = id.kv.count("BRAND") ? id.kv["BRAND"] : "unknown";
             std::string channel  = id.kv["PRODUCT"].find("_beta") != std::string::npos ? "CANARY" : "REL";
             char fp[512];
             snprintf(fp, sizeof(fp), "%s/%s/%s:%s/%s/%s:user/release-keys",
-                     brand_lc.c_str(),
+                     brand.c_str(),
                      id.kv["PRODUCT"].c_str(), id.kv["DEVICE"].c_str(),
                      channel.c_str(),
                      id.kv["ID"].c_str(), id.kv["INCREMENTAL"].c_str());
