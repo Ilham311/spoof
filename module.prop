@@ -1,6 +1,6 @@
 id=dynamic_env_module
 name=Dynamic Environment ZYGISK
-version=v1-FIX 
+version=v1-FIX-release 
 versionCode=1
 author=Ilham 
 description=Pure-Zygisk device identity emulator. Fresh identity from embedded Pixel pool. Covers 25 Build.* fields + native ro.serialno / display.id / baseband. No shell core.
