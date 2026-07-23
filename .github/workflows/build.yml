@@ -1,11 +1,17 @@
-name: Build Dynamic Environment & Auto Release
+name: Build Dynamic Environment ZYGISK
 
 on:
   push:
     branches: [main]
     paths:
-      - 'module.prop' # Akan otomatis jalan dan rilis kalau kamu mengubah versi di module.prop
-  pull_request:
+      - module.prop
+      - update.json
+      - jni/**
+      - customize.sh
+      - action.sh
+      - service.sh
+      - pool.json
+      - .github/workflows/build.yml
   workflow_dispatch:
 
 permissions:
@@ -14,85 +20,92 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Mengambil versi dari module.prop seperti versi lamamu
-      - name: Get Version info
-        id: get_version
+      - name: Extract module version
+        id: mp
         run: |
-          VERSION=$(grep '^version=' module.prop | cut -d'=' -f2 | tr -d '\r')
-          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          VER=$(grep -E '^version=' module.prop | cut -d= -f2)
+          CODE=$(grep -E '^versionCode=' module.prop | cut -d= -f2)
+          echo "version=$VER"       >> "$GITHUB_OUTPUT"
+          echo "version_code=$CODE" >> "$GITHUB_OUTPUT"
 
       - name: Setup Android NDK
         uses: nttld/setup-ndk@v1
         id: setup-ndk
         with:
           ndk-version: r27b
-          add-to-path: false
+          add-to-path: true
 
-      - name: Fetch zygisk.hpp
+      - name: Download zygisk.hpp
         run: |
-          curl -sSL https://raw.githubusercontent.com/topjohnwu/zygisk-module-sample/master/module/jni/zygisk.hpp \
-               -o jni/zygisk.hpp
+          mkdir -p jni
+          curl -fsSL -o jni/zygisk.hpp \
+            https://raw.githubusercontent.com/topjohnwu/zygisk-module-sample/master/module/jni/zygisk.hpp
 
-      - name: Build for all ABIs
+      - name: Build native (all ABIs)
         env:
           ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
         run: |
-          for abi in arm64-v8a armeabi-v7a x86_64 x86; do
-            echo "==> Building $abi"
-            cmake -B build/$abi \
-              -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake \
-              -DANDROID_ABI=$abi \
+          set -eux
+          for ABI in arm64-v8a armeabi-v7a x86_64 x86; do
+            BUILD_DIR="build/$ABI"
+            mkdir -p "$BUILD_DIR"
+            cmake -S jni -B "$BUILD_DIR" \
+              -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" \
+              -DANDROID_ABI="$ABI" \
               -DANDROID_PLATFORM=android-26 \
-              -DCMAKE_BUILD_TYPE=Release \
-              -S jni
-            cmake --build build/$abi --parallel
+              -DCMAKE_BUILD_TYPE=MinSizeRel
+            cmake --build "$BUILD_DIR" -j
           done
 
       - name: Assemble module zip
-        env:
-          VERSION_TAG: ${{ steps.get_version.outputs.VERSION }} # Pakai versi dari module.prop
         run: |
-          mkdir -p pkg/zygisk pkg/bin
+          set -eux
+          PKG="pkg"
+          mkdir -p "$PKG/zygisk" "$PKG/bin"
 
-          cp build/arm64-v8a/libenv.so   pkg/zygisk/arm64-v8a.so
-          cp build/armeabi-v7a/libenv.so pkg/zygisk/armeabi-v7a.so
-          cp build/x86_64/libenv.so      pkg/zygisk/x86_64.so
-          cp build/x86/libenv.so         pkg/zygisk/x86.so
+          # Zygisk .so per ABI
+          cp build/arm64-v8a/libenv.so    "$PKG/zygisk/arm64-v8a.so"
+          cp build/armeabi-v7a/libenv.so  "$PKG/zygisk/armeabi-v7a.so"
+          cp build/x86_64/libenv.so       "$PKG/zygisk/x86_64.so"
+          cp build/x86/libenv.so          "$PKG/zygisk/x86.so"
 
-          cp build/arm64-v8a/envctl   pkg/bin/envctl-arm64
-          cp build/armeabi-v7a/envctl pkg/bin/envctl-arm
-          cp build/x86_64/envctl      pkg/bin/envctl-x86_64
-          cp build/x86/envctl         pkg/bin/envctl-x86
+          # envctl per ABI (customize.sh symlinks the right one at install)
+          cp build/arm64-v8a/envctl       "$PKG/bin/envctl-arm64"
+          cp build/armeabi-v7a/envctl     "$PKG/bin/envctl-arm"
+          cp build/x86_64/envctl          "$PKG/bin/envctl-x86_64"
+          cp build/x86/envctl             "$PKG/bin/envctl-x86"
 
-          cp module.prop action.sh service.sh customize.sh pool.json pkg/
-
+          # prebuilt resetprop-rs (drop into repo/prebuilt/ manually)
           if [ -f prebuilt/resetprop-rs ]; then
-            cp prebuilt/resetprop-rs pkg/bin/
-            chmod +x pkg/bin/resetprop-rs
+            cp prebuilt/resetprop-rs      "$PKG/bin/resetprop-rs"
           else
-            echo "! WARNING: prebuilt/resetprop-rs missing — zip akan tanpa resetprop"
+            echo "WARN: prebuilt/resetprop-rs missing (native prop won't apply until user drops it in)"
           fi
 
-          ZIP_NAME="env-${VERSION_TAG}-pure-zygisk.zip"
-          echo "ZIP_NAME=$ZIP_NAME" >> $GITHUB_ENV
+          # Module root files (P2 verify: pool.json included)
+          cp module.prop customize.sh action.sh service.sh "$PKG/"
+          [ -f pool.json ]         && cp pool.json         "$PKG/"
+          [ -f hook_targets.txt ]  && cp hook_targets.txt  "$PKG/"
 
-          cd pkg && zip -r "../$ZIP_NAME" .
+          ZIP="env-${{ steps.mp.outputs.version }}-pure-zygisk.zip"
+          (cd "$PKG" && zip -r "../$ZIP" .)
+          echo "ZIP=$ZIP" >> "$GITHUB_ENV"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.ZIP_NAME }}
-          path: ${{ env.ZIP_NAME }}
+          name: env-${{ steps.mp.outputs.version }}
+          path: ${{ env.ZIP }}
 
-      - name: Auto Release to GitHub
+      - name: Publish release
+        if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.get_version.outputs.VERSION }}
-          name: Release ${{ steps.get_version.outputs.VERSION }}
-          files: ${{ env.ZIP_NAME }}
-          generate_release_notes: true
+          tag_name: ${{ steps.mp.outputs.version }}
+          name: ${{ steps.mp.outputs.version }}
+          files: ${{ env.ZIP }}
+          fail_on_unmatched_files: true
