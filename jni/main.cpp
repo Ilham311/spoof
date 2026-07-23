@@ -1,6 +1,3 @@
-// ============================================================
-// Dynamic Environment v5.1 — Zygisk hook module (unchanged from v1-FIX)
-// ============================================================
 #include <jni.h>
 #include <unistd.h>
 #include <sys/system_properties.h>

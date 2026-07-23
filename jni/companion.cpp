@@ -1,19 +1,9 @@
-// ============================================================
-// Dynamic Environment v5.1 — Root companion (production fix)
-// Runs in dedicated root process (spawned by Zygisk framework).
-// Handles Zygisk-hook IPC + UDS listener for envctl CLI.
-//
-// v5.1 changes vs v1-FIX-release:
-//   [P1] hook_targets.txt hot-reload via stat().st_mtime
-//   [P1] FINGERPRINT fallback uses real BRAND (not hardcoded "google/")
-//   [P1] RADIO fallback per-brand (google/samsung/qcom-vendor)
-// ============================================================
 #include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
 #include <sys/socket.h>
 #include <sys/un.h>
-#include <sys/stat.h>       // + P1: for stat/st_mtime
+#include <sys/stat.h>
 #include <sys/wait.h>
 #include <sys/types.h>
 #include <pthread.h>
@@ -30,16 +20,13 @@
 #include <cstring>
 #include <cstdio>
 #include <cstdlib>
-#include <cctype>            // + P1: for tolower
-#include <algorithm>         // + P1: for transform
+#include <cctype>
+#include <algorithm>
 
 #define LOG_TAG "EnvCompanion"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO,  LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
-// ============================================================
-// Protocols
-// ============================================================
 enum : uint8_t { CMD_CHECK_TARGET = 1, CMD_GET_IDENTITY = 2, };
 enum : uint8_t {
     CLI_REGENERATE = 10, CLI_STATUS = 11, CLI_APPLY_BOOT = 12,
@@ -47,9 +34,6 @@ enum : uint8_t {
     CLI_KEEP_ID    = 16,
 };
 
-// ============================================================
-// Paths
-// ============================================================
 static const char* MODDIR         = "/data/adb/modules/dynamic_env_module";
 static const char* IDENTITY_FILE  = "/data/adb/modules/dynamic_env_module/identity.prop";
 static const char* IDENTITY_BAK   = "/data/adb/modules/dynamic_env_module/identity.prop.bak";
@@ -60,9 +44,6 @@ static const char* RESETPROP      = "/data/adb/modules/dynamic_env_module/bin/re
 static const char* POOL_FILE      = "/data/adb/modules/dynamic_env_module/pool.json";
 static const char* UDS_NAME       = "env.ctrl";
 
-// ============================================================
-// Embedded Pixel device pool (fallback kalau pool.json absent)
-// ============================================================
 struct PixelEntry {
     const char* model; const char* device; const char* product;
     const char* board; const char* hardware; int sdk;
@@ -93,9 +74,6 @@ static const std::vector<PixelEntry> PIXEL_POOL = {
     {"Pixel Tablet",    "tangorpro", "tangorpro_beta", "tangorpro", "tangorpro", 36, "16", "BP1A.250705.006", "13051216", "2026-07-05"},
 };
 
-// ============================================================
-// Helpers
-// ============================================================
 static std::string to_lower(std::string s) {
     std::transform(s.begin(), s.end(), s.begin(),
                    [](unsigned char c){ return std::tolower(c); });
@@ -162,9 +140,6 @@ static void run_bin(const char* path, std::vector<const char*> argv) {
     } else if (pid > 0) waitpid(pid, nullptr, 0);
 }
 
-// ============================================================
-// [P1] hook_targets.txt hot-reload with mtime-based cache
-// ============================================================
 static std::set<std::string> load_targets_from_disk() {
     std::set<std::string> s;
     std::ifstream f(HOOK_TARGETS);
@@ -200,9 +175,6 @@ static std::set<std::string> get_targets_cached() {
     return snapshot;
 }
 
-// ============================================================
-// [P1] Per-brand RADIO builder
-// ============================================================
 static std::string build_radio_for(const std::string& brand,
                                     const std::string& incremental) {
     std::string b = to_lower(brand);
@@ -217,23 +189,17 @@ static std::string build_radio_for(const std::string& brand,
         snprintf(rad, sizeof(rad), "g5300q-%s-%s-B-%s",
                  datebuf, datebuf, incremental.c_str());
     } else if (b == "samsung") {
-        // Samsung uses INCREMENTAL as radio version
         snprintf(rad, sizeof(rad), "%s", incremental.c_str());
     } else if (b == "xiaomi" || b == "poco"   || b == "redmi" ||
                b == "oppo"   || b == "realme" || b == "oneplus" ||
                b == "vivo"   || b == "iqoo") {
-        // Qualcomm MPSS-style (Snapdragon 8-series baseband)
         snprintf(rad, sizeof(rad),
                  "MPSS.HI.4.0.c1-00104-SUNXFAAAAAAAZOZM-1.%s",
                  datebuf);
     }
-    // else: unknown brand → return "" (caller should skip, don't write "unknown")
     return std::string(rad);
 }
 
-// ============================================================
-// Identity struct + serializer
-// ============================================================
 struct Identity {
     std::map<std::string, std::string> kv;
     std::string serialize() const {
@@ -284,9 +250,6 @@ static std::vector<std::map<std::string, std::string>> load_json_pool() {
     return pool;
 }
 
-// ============================================================
-// Identity generation
-// ============================================================
 static Identity generate_identity(bool keep_id) {
     std::random_device rd;
     std::mt19937 gen(rd());
@@ -319,7 +282,6 @@ static Identity generate_identity(bool keep_id) {
                      id.kv["ID"].c_str(), id.kv["INCREMENTAL"].c_str());
             id.kv["DESCRIPTION"] = desc;
         }
-        // [P1 FIX] FINGERPRINT fallback uses real BRAND (not hardcoded "google/")
         if (id.kv.find("FINGERPRINT") == id.kv.end()) {
             std::string brand = id.kv.count("BRAND") ? id.kv["BRAND"] : "unknown";
             std::string channel  = id.kv["PRODUCT"].find("_beta") != std::string::npos ? "CANARY" : "REL";
@@ -331,7 +293,6 @@ static Identity generate_identity(bool keep_id) {
                      id.kv["ID"].c_str(), id.kv["INCREMENTAL"].c_str());
             id.kv["FINGERPRINT"] = fp;
         }
-        // [P1 FIX] RADIO fallback per-brand (don't write "unknown")
         if (id.kv.find("RADIO") == id.kv.end()) {
             std::string rad = build_radio_for(
                 id.kv.count("BRAND") ? id.kv["BRAND"] : "",
@@ -339,7 +300,6 @@ static Identity generate_identity(bool keep_id) {
             if (!rad.empty()) id.kv["RADIO"] = rad;
         }
     } else {
-        // Fallback to embedded PIXEL_POOL
         std::uniform_int_distribution<size_t> pick(0, PIXEL_POOL.size() - 1);
         const PixelEntry& p = PIXEL_POOL[pick(gen)];
         id.kv["BRAND"]                  = "google";
@@ -395,9 +355,6 @@ static Identity generate_identity(bool keep_id) {
     return id;
 }
 
-// ============================================================
-// Apply native prop + settings + kill target apps
-// ============================================================
 static void apply_native(const Identity& id, bool clear_targets = true) {
     auto get = [&](const std::string& k) -> std::string {
         auto it = id.kv.find(k);
@@ -434,7 +391,6 @@ static void apply_native(const Identity& id, bool clear_targets = true) {
                 {"settings", "put", "secure", "android_id", aid.c_str()});
     }
 
-    // [P1 FIX] Use hot-reload cache instead of loading disk every time
     auto targets = get_targets_cached();
     for (const std::string& pkg : targets) {
         run_bin("/system/bin/am", {"am", "force-stop", pkg.c_str()});
@@ -442,9 +398,6 @@ static void apply_native(const Identity& id, bool clear_targets = true) {
     }
 }
 
-// ============================================================
-// CLI command handlers
-// ============================================================
 static std::string do_regenerate(bool keep_id) {
     std::string mode = trim(read_file(MODE_FILE));
     if (mode == "locked")
@@ -569,9 +522,6 @@ static void handle_cli(int client) {
     ::close(client);
 }
 
-// ============================================================
-// UDS listener with peer credential check
-// ============================================================
 static void* uds_listener(void*) {
     int sock = ::socket(AF_UNIX, SOCK_STREAM, 0);
     if (sock < 0) { LOGE("socket() failed"); return nullptr; }
@@ -616,9 +566,6 @@ static void start_uds_thread_once() {
     }
 }
 
-// ============================================================
-// Zygisk companion entry
-// ============================================================
 extern "C" __attribute__((visibility("default")))
 void env_companion_entry(int client) {
     pthread_once(&g_once, start_uds_thread_once);
@@ -630,7 +577,6 @@ void env_companion_entry(int client) {
             if (::read(client, &len, sizeof(len)) != sizeof(len) || len > 512) break;
             std::string pkg(len, 0);
             if (::read(client, pkg.data(), len) != (ssize_t)len) break;
-            // [P1 FIX] hot-reload cache instead of static-once
             auto targets = get_targets_cached();
             uint8_t r = targets.count(pkg) ? 1 : 0;
             ::write(client, &r, 1);

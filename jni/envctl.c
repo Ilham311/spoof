@@ -1,5 +1,3 @@
-// envctl - Tiny CLI for Dynamic Environment
-// Connects to abstract UDS @env.ctrl, sends command, prints reply.
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
